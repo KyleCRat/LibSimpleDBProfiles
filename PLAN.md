@@ -9,12 +9,25 @@ companion until the required core API has a reviewed `2.0.0` tag.
 
 ## Goal
 
-Build a reusable scoped profile manager on top of `LibSimpleDB-2.0` without
-adding profile or scope prefixes to hot-path database reads.
+Build a reusable profile manager on top of `LibSimpleDB-2.0` without adding
+profile identity or selection work to hot-path database reads.
 
-The companion will own scoped storage, profile selection, profile lifecycle,
-copying, renaming, deletion, and migration policy. LibSimpleDB will continue
-to own nested defaults, reads, writes, resets, validation, and path callbacks.
+The library presents one public profile model:
+
+- Permanent profiles backed by canonical character, specialization, class,
+  realm, faction, and global storage
+- User profiles with normalized user-supplied names
+- A virtual Automatic profile that selects the most specific non-empty
+  permanent profile
+
+Consumers use the same profile-selection, active-database, reset, copy, and
+lifecycle APIs for permanent and user profiles. Internal canonical storage
+remains separated because each permanent profile has different identity and
+automatic-selection semantics, but the term `scope` is not part of the
+consumer-facing model or UI contract.
+
+LibSimpleDB continues to own nested defaults, reads, writes, resets,
+validation, and path callbacks.
 
 ## Library Identity
 
@@ -27,366 +40,509 @@ to own nested defaults, reads, writes, resets, validation, and path callbacks.
 - No standalone addon TOC unless an in-game development harness later requires
   one
 
-The profile companion is a separate API family and release stream. A compatible
-companion update increments its LibStub minor and uses SemVer Git tags without a
-`v` prefix.
+The companion has its own API family and release stream. A compatible update
+increments its LibStub minor and uses a SemVer Git tag without a `v` prefix.
 
-## Why This Is A Companion Library
+## Consumer Storage
 
-Profiles add storage and selection policy that does not belong in the core
-database abstraction:
+Every consumer passes an addon-owned account-wide SavedVariables table by
+reference:
 
-- Profile names and character-to-profile mappings
-- Global versus profile scope ownership
-- Realm, character, class, specialization, and faction scope ownership
-- Create, copy, rename, reset, and delete behavior
-- Profile lifecycle events
-- Storage schema migrations
+```toc
+## SavedVariables: MyAddonDB
+```
 
-Keeping these concerns separate preserves LibSimpleDB as a small general-purpose
-database library. Addons that do not need profiles do not embed unused policy.
+```lua
+local manager = Profiles:New(MyAddonDB, defaults)
+```
+
+Do not use character-specific SavedVariables for manager storage:
+
+```toc
+## SavedVariablesPerCharacter: MyAddonDB
+```
+
+A per-character table would isolate every permanent and user profile to one
+character and prevent cross-character sharing. The constructor receives only a
+table reference and cannot reliably determine which TOC field declared it, so
+account-wide ownership is a documented consumer requirement.
+
+The outer table is the consumer namespace. Profile data must never be stored on
+the shared LibStub library table.
+
+Two addons using the library remain independent:
+
+```lua
+local managerA = Profiles:New(AddonADB, defaultsA)
+local managerB = Profiles:New(AddonBDB, defaultsB)
+```
+
+A permanent Elemental profile in `AddonADB` is invisible to `AddonBDB`.
+Consumers do not add another addon-name key inside their storage because their
+outer SavedVariables table already supplies that namespace. Each addon must use
+a unique TOC SavedVariables global name.
+
+An addon needing multiple logical databases supplies separate child tables,
+such as `MyAddonDB.settings` and `MyAddonDB.layout`. Passing the same storage
+table to multiple managers intentionally shares one profile namespace and is
+not the normal consumer pattern.
 
 ## Storage Schema
 
-The proposed account-wide SavedVariables container is:
+Permanent profiles retain canonical internal containers. User profiles retain
+their normalized name as their exact storage key:
 
 ```lua
 MyAddonDB = {
     global = {},
     realms = {
-        ["Area 52"] = {},
+        ["3676"] = {},
     },
     characters = {
-        ["Character - Area 52"] = {},
+        ["Player-3676-01234567"] = {},
     },
     classes = {
-        MAGE = {},
+        SHAMAN = {},
     },
     specs = {
-        ["MAGE:62"] = {},
+        ["262"] = {},
     },
     factions = {
         Horde = {},
     },
     profiles = {
-        Default = {},
+        ["团队配置"] = {},
     },
-    profileKeys = {
-        ["Character - Realm"] = "Default",
+    selections = {
+        ["Player-3676-01234567"] = {
+            kind = "user",
+            name = "团队配置",
+        },
     },
 }
 ```
 
-The addon supplies the required `selectionKey` and the keys for every keyed
-scope. The companion must not derive character, realm, class, specialization,
-or faction identity from game APIs. This keeps player identity and gameplay
-policy out of the library.
-
-The `selectionKey` identifies whose profile choice is being remembered. It is
-independent of the character scope key and can represent a character, a
-character-specialization pair, a loadout, or another consumer-defined
-selection context:
+A forced permanent-profile selection stores the permanent profile type rather
+than its current derived identity key:
 
 ```lua
-storage.profileKeys[selectionKey] = profileName
+storage.selections[playerGUID] = {
+    kind = "permanent",
+    profile = "class",
+}
 ```
 
-Defaults are separated by scope:
+No stored selection means the virtual Automatic profile is selected:
+
+```lua
+storage.selections[playerGUID] = nil
+```
+
+All permanent and user profiles store the same data schema and use the same
+defaults:
 
 ```lua
 local defaults = {
-    global = {
-        minimap = { hide = false },
+    display = {
+        scale = 1,
     },
-    realm = {},
-    character = {},
-    class = {},
-    spec = {},
-    faction = {},
-    profile = {
-        display = { scale = 1 },
+    minimap = {
+        hide = false,
     },
 }
 ```
 
-Defaults are not copied into every stored profile. Empty profile tables fall
-back through the one profile database instance's defaults.
+Defaults belong to the stable active LibSimpleDB instance and are not
+materialized into profile storage.
+
+## Permanent Profiles
+
+The library derives permanent-profile identities from nonlocalized game values.
+Consumers do not supply or rename these keys.
+
+| Permanent profile | Canonical storage key |
+|---|---|
+| Global | No key; `storage.global` |
+| Realm | `tostring(GetRealmID())` |
+| Character | `UnitGUID("player")` |
+| Class | Class filename from `UnitClassBase("player")`, such as `SHAMAN` |
+| Specialization | `tostring(specID)`, such as `262` |
+| Faction | Tag from `UnitFactionGroup("player")`, such as `Horde` |
+
+The current canonical table for every permanent profile is normalized during
+construction and is never deleted. A table may be empty, but its permanent
+profile remains selectable and resettable.
+
+`New()` must run after the consumer's SavedVariables are loaded and player
+identity APIs are available. It fails clearly when required identity cannot be
+resolved. A temporarily unavailable or zero specialization is not a valid
+specialization identity; Automatic skips Specialization until a valid ID is
+known.
+
+The library listens for `ACTIVE_PLAYER_SPECIALIZATION_CHANGED`:
+
+- Automatic re-evaluates its permanent-profile priority.
+- A forced Specialization profile follows the new active specialization and
+  stays explicitly selected even when the new profile is empty.
+- A forced user or other permanent profile remains unchanged.
+
+Tests mock identity APIs. The public API does not expose arbitrary identity
+overrides solely for tests.
+
+## Profile References
+
+Profile selection uses typed references, never visible names alone. This keeps
+permanent and user profiles unambiguous even when their display names match.
+
+```lua
+local automaticRef = {
+    kind = "automatic",
+}
+
+local permanentRef = {
+    kind = "permanent",
+    profile = "spec",
+}
+
+local userRef = {
+    kind = "user",
+    name = "Raid",
+}
+```
+
+Accepted permanent profile identifiers are `character`, `spec`, `class`,
+`realm`, `faction`, and `global`. References returned by the library are
+detached snapshots and may be passed back to profile methods.
+
+The virtual Automatic reference does not own a data table. It resolves to a
+permanent profile and exposes that table through the active database.
+
+## Profile Descriptors
+
+`GetProfiles()` returns descriptors for Automatic, every current permanent
+profile, and every user profile. Consumers can build one selector without
+knowing separate selection APIs.
+
+```lua
+{
+    ref = {
+        kind = "permanent",
+        profile = "spec",
+    },
+    displayName = "Elemental",
+    permanent = true,
+    selected = false,
+    active = true,
+    hasData = true,
+    canReset = true,
+    canRename = false,
+    canDelete = false,
+}
+```
+
+```lua
+{
+    ref = {
+        kind = "user",
+        name = "Raid",
+    },
+    displayName = "Raid",
+    permanent = false,
+    selected = false,
+    active = false,
+    hasData = true,
+    canReset = true,
+    canRename = true,
+    canDelete = true,
+}
+```
+
+The Automatic descriptor is permanent and reports the permanent profile it
+currently activates. It has no independent raw data table.
+
+`selected` identifies the entry chosen by the current character. `active`
+identifies the entry supplying `activeDB` data. When Automatic is selected, its
+descriptor has `selected = true` and the matching permanent profile has
+`active = true`; the permanent profile is not also reported as selected. A
+forced permanent or user profile is both selected and active.
+
+Descriptors expose capabilities so a consumer UI can disable unsupported
+commands without hard-coding profile kinds. Library methods still enforce the
+same rules when called directly.
+
+The default descriptor order is:
+
+```text
+Automatic
+Character
+Specialization
+Class
+Realm
+Faction
+Global
+User profiles
+```
+
+The library supplies localized permanent-profile display names from current
+player information. The UI may show one flat list, lock permanent entries, or
+optionally group permanent and user-created profiles. It never needs to expose
+the implementation term `scope`.
+
+## User Profile Names
+
+The normalized user name is the exact key in `storage.profiles` and the exact
+name stored in a user-profile reference:
+
+```lua
+local ref = manager:CreateProfile("团队配置")
+
+storage.profiles["团队配置"] = {}
+```
+
+Every method accepting a user profile name applies the same normalization:
+
+1. Require a string containing valid UTF-8.
+2. Trim leading and trailing ASCII whitespace.
+3. Collapse internal ASCII whitespace runs to one ASCII space.
+4. Reject an empty result and ASCII control characters.
+5. Preserve case and every valid non-ASCII character.
+
+Names are case-sensitive and have no library-level length limit. Validation
+must not use ASCII-only allowlists such as `%w` or `[A-Za-z]`. Chinese,
+Japanese, Korean, Cyrillic, Arabic, accented Latin, and other valid UTF-8 names
+must work without transliteration or data loss.
+
+Unicode normalization and case folding are not attempted because WoW's Lua 5.1
+environment has no portable canonical normalization primitive. A consumer UI
+may apply a display-oriented input limit, but the library does not.
+
+`Automatic` and the current permanent-profile display names are reserved. A
+new user profile whose normalized name exactly matches one of them is rejected.
+Typed references remain authoritative if a later character, specialization,
+realm, or locale introduces a display-name collision. In that case descriptors
+must qualify the user entry as Custom so the UI remains unambiguous without
+renaming stored data.
+
+## Automatic Profile
+
+With no stored character selection, Automatic chooses the first permanent
+profile containing raw data:
+
+```text
+Character > Specialization > Class > Realm > Faction > Global
+```
+
+Global is always the final fallback even when empty. Other empty permanent
+profiles are skipped only by Automatic; they remain valid explicit selections.
+
+An Elemental Shaman with an empty Character profile uses the non-empty
+Elemental profile. When Elemental is empty, Automatic checks Shaman, then the
+current realm, faction, and Global.
+
+Automatic selects one complete database. Values are not merged or resolved per
+path across less-specific permanent profiles. LibSimpleDB defaults remain the
+only per-path fallback for the selected database.
+
+Automatic observes only the current manager's consumer-owned storage. A
+matching Elemental profile in another addon's SavedVariables has no effect.
 
 ## Active-Root Architecture
 
-The companion creates one stable LibSimpleDB instance for every supported
-scope:
+The manager owns one stable LibSimpleDB instance:
 
 ```lua
-local globalDB = LibSimpleDB:New(storage.global, defaults.global)
-local realmDB = LibSimpleDB:New(
-    storage.realms[scopeKeys.realm],
-    defaults.realm
-)
-local characterDB = LibSimpleDB:New(
-    storage.characters[scopeKeys.character],
-    defaults.character
-)
-local classDB = LibSimpleDB:New(
-    storage.classes[scopeKeys.class],
-    defaults.class
-)
-local specDB = LibSimpleDB:New(
-    storage.specs[scopeKeys.spec],
-    defaults.spec
-)
-local factionDB = LibSimpleDB:New(
-    storage.factions[scopeKeys.faction],
-    defaults.faction
-)
-local profileDB = LibSimpleDB:New(
-    storage.profiles[currentProfile],
-    defaults.profile
-)
+local activeDB = LibSimpleDB:New(selectedData, defaults)
 ```
 
-Consumers read directly from the selected scope:
+Profile changes rebind that instance:
 
 ```lua
-profileDB:Get("display", "scale")
-globalDB:Get("minimap", "hide")
-specDB:Get("layout", "enabled")
+activeDB:SetData(newSelectedData)
 ```
 
-Do not expose a facade that prepends scope or profile keys:
+Consumers retain and read the active database directly:
+
+```lua
+local db = manager:GetActiveDB()
+db:Get("display", "scale")
+```
+
+Do not expose a read facade that prepends profile identity:
 
 ```lua
 -- Rejected design
-manager:Get("profiles", currentProfile, "display", "scale")
-manager:Get("global", "minimap", "hide")
+manager:Get("specs", specID, "display", "scale")
 ```
 
-Profile switching rebinds the existing profile database:
+The active database object remains stable for the manager's lifetime. Profile
+resolution occurs only during initialization, selection, reset, identity, or
+profile-management changes. Ordinary LibSimpleDB reads do not run through the
+companion.
 
-```lua
-profileDB:SetData(storage.profiles[newProfile])
-```
-
-The profile lookup happens once during initialization or switching. Ordinary
-`Get()` calls retain their original path depth and performance.
-
-`SetScopeKey(scope, key)` rebinds the existing database object for `realm`,
-`character`, `class`, `spec`, or `faction`. This supports context changes such
-as a specialization switch without invalidating a database object retained by
-a consumer.
-
-## Read-Path Invariants
-
-- The companion must not run on the hot path of `profileDB:Get()` or
-  any scoped database `Get()`.
-- Scope and active-profile resolution happen only during initialization or an
-  explicit selection or scope-key change.
-- Maintain one stable profile LibSimpleDB instance, not one instance per stored
-  profile.
-- Maintain one stable LibSimpleDB instance for every supported scope.
-- Do not copy defaults per profile.
-- Do not add transparent value caches. The retained SavedVariables tables are
-  mutable references and cannot be invalidated reliably after external changes.
-- Consumers with per-frame settings reads should cache applied values and
-  refresh them through profile/data lifecycle notifications.
-- Profile and scope changes are cold paths. Correctness and clear lifecycle
-  notifications take priority over optimizing those operations.
-
-## Proposed Constructor And Accessors
+## Constructor And Core API
 
 ```lua
 local Profiles = LibStub("LibSimpleDBProfiles-1.0")
-
-local manager = Profiles:New(storage, defaults, {
-    selectionKey = "Character - Realm",
-    scopeKeys = {
-        realm = "Realm",
-        character = "Character - Realm",
-        class = "MAGE",
-        spec = "MAGE:62",
-        faction = "Horde",
-    },
-    defaultProfile = "Default",
-})
-
-local globalDB = manager:GetGlobalDB()
-local realmDB = manager:GetRealmDB()
-local characterDB = manager:GetCharacterDB()
-local classDB = manager:GetClassDB()
-local specDB = manager:GetSpecDB()
-local factionDB = manager:GetFactionDB()
-local profileDB = manager:GetProfileDB()
+local manager = Profiles:New(storage, defaults)
+local db = manager:GetActiveDB()
 ```
 
-Proposed core methods:
+Proposed unified profile API:
 
 ```lua
-manager:GetGlobalDB()
-manager:GetRealmDB()
-manager:GetCharacterDB()
-manager:GetClassDB()
-manager:GetSpecDB()
-manager:GetFactionDB()
-manager:GetProfileDB()
-manager:GetSelectionKey()
-manager:SetSelectionKey(key)
-manager:GetScopeKey(scope)
-manager:SetScopeKey(scope, key)
-manager:GetCurrentProfile()
-manager:GetProfileNames()
-manager:SetProfile(name)
+manager:GetActiveDB()
+manager:GetProfiles()
+manager:GetSelectedProfile()
+manager:GetActiveProfile()
+manager:SetProfile(profileRef)
 manager:CreateProfile(name)
-manager:CopyProfile(sourceName, destinationName, options)
-manager:RenameProfile(oldName, newName)
-manager:DeleteProfile(name)
-manager:ResetProfile()
+manager:CopyProfile(sourceRef, destinationRef, options)
+manager:ResetProfile(profileRef, options)
+manager:RenameProfile(profileRef, newName)
+manager:DeleteProfile(profileRef)
 ```
 
-The returned database objects must remain stable for the manager's lifetime.
+`SetProfile()` is the only selection endpoint. It accepts Automatic, permanent,
+and user references. `CreateProfile()` returns a user reference suitable for
+passing directly to `SetProfile()`.
 
-`selectionKey` and every entry in `scopeKeys` are required non-empty strings.
-They can change only through their explicit setter methods; mutating the
-constructor options table has no effect.
+Passing a missing user reference to `SetProfile()` creates that user profile
+before selecting it. Selecting the active profile in the same mode is a no-op.
 
-## Profile Operation Semantics
+`GetSelectedProfile()` returns the detached profile descriptor chosen by the
+current character. `GetActiveProfile()` returns the detached descriptor whose
+table supplies `activeDB`. Under Automatic these are different descriptors;
+under a forced permanent or user profile they describe the same entry.
+
+## Profile Operations
 
 ### Select
 
-`SetProfile(name)` should:
+Selecting a user profile stores its normalized name for the current character.
+Selecting a permanent profile stores its permanent profile type. Selecting
+Automatic removes the current character's stored selection and immediately
+runs automatic resolution.
 
-1. Normalize and validate the profile name.
-2. Create an empty target profile when it does not exist.
-3. Update `storage.profileKeys[selectionKey]`.
-4. Update the manager's active profile name.
-5. Call `profileDB:SetData(targetTable)`.
-6. Dispatch the manager profile-change lifecycle notification.
-
-Selecting the active profile is a no-op.
-
-When selection creates a profile, `OnProfileCreated` fires before the database
-is rebound and `OnProfileChanged` fires.
-
-### Selection Key
-
-`SetSelectionKey(key)` changes the context whose selected profile is active. It
-resolves the new key's mapped profile or `defaultProfile`, creates that profile
-when needed, and rebinds the stable profile database only when the resolved
-profile differs from the current profile.
-
-Changing to a selection key that resolves to the already active profile does
-not fire `OnProfileChanged`.
-
-### Scope Keys
-
-`SetScopeKey(scope, key)` accepts only `realm`, `character`, `class`, `spec`, or
-`faction`. It validates the key, creates an empty raw scope table when the key
-has not been seen before, and rebinds that scope's stable database with
-`SetData()`.
-
-Setting the current key is a no-op. A successful rebind relies on that scoped
-LibSimpleDB instance's `OnDataChanged`; it does not fire a profile lifecycle
-event.
+An explicit user or permanent profile remains selected until another profile
+reference is passed to `SetProfile()`.
 
 ### Create
 
-Creating a profile adds an empty raw table. Defaults remain owned by the stable
-profile database instance and are not materialized into storage.
+`CreateProfile(name)` creates an empty user profile, rejects existing and
+reserved names, and returns its typed reference. It does not select the profile
+unless the returned reference is passed to `SetProfile()`.
 
 ### Copy
 
-Copy only raw overrides from the source profile. The destination must receive a
-detached deep copy so profiles never share mutable nested tables. The companion
-owns the profile container and can perform this copy without accessing private
-LibSimpleDB instance fields.
+Copy only raw overrides. The destination receives a detached deep copy so
+profiles never share nested tables.
 
-Copying to an existing destination is rejected unless the caller passes
-`{ overwrite = true }`. The explicit option records destructive intent after a
-UI or other caller has confirmed the operation.
+Automatic may be used as a source and copies from its active permanent profile.
+Automatic cannot be a destination because it owns no storage. Permanent and
+user profiles may be destinations. Copying into an existing destination
+requires `{ overwrite = true }`.
 
 ### Reset
 
-Reset the active profile through `profileDB:Reset()` so its data table identity
-is preserved and normal LibSimpleDB lifecycle behavior applies.
+`ResetProfile()` resets the supplied profile or the active profile when no
+reference is supplied. Reset clears raw data in place and preserves table
+identity.
+
+Permanent profiles are never removed by reset. An explicitly selected
+permanent profile stays selected after becoming empty. An explicitly selected
+user profile also stays selected.
+
+When Automatic is selected, resetting its active permanent profile keeps the
+character in Automatic mode. If that profile becomes empty, Automatic
+immediately selects the next less-specific non-empty permanent profile. Global
+remains selected when every permanent profile is empty.
+
+The explicit option below resets an active forced profile and then returns the
+character to Automatic:
+
+```lua
+manager:ResetProfile(nil, {
+    setAutomatic = true,
+})
+```
+
+The option is rejected when resetting an inactive profile because changing the
+current character's selection would be unrelated to that target.
 
 ### Rename
 
-Move the stored profile table without copying it, update every matching
-`profileKeys` entry, and preserve the active data table when renaming the active
-profile. Renaming to an existing destination is always rejected.
+Only user profiles can be renamed. Move the stored table without copying it,
+update every stored user selection referring to the old name, and preserve the
+active data table when renaming the active profile.
+
+Renaming a permanent or Automatic profile is rejected. Renaming to an existing
+or reserved name is rejected.
 
 ### Delete
 
-Deleting the active profile is rejected. Deleting an inactive profile removes
-every matching `profileKeys` entry so those selection contexts resolve to
-`defaultProfile` the next time they are used. Deletion must never leave a
-selection pointing at a missing profile.
+Permanent profiles and Automatic cannot be deleted. There is no public or
+internal scope-deletion operation.
 
-## Profile Name Contract
-
-Every method that accepts a profile name applies the same normalization before
-lookup or mutation:
-
-1. Require a string.
-2. Trim leading and trailing whitespace.
-3. Collapse internal whitespace runs to one ASCII space.
-4. Reject an empty result, remaining control characters, and invalid UTF-8 byte
-   sequences.
-5. Preserve case and valid non-ASCII characters.
-
-Names are case-sensitive. The library imposes no length limit; a consumer UI
-may impose a display-oriented limit. Unicode normalization and case folding are
-not attempted because WoW's Lua 5.1 environment has no portable canonical
-normalization primitive.
+Only user profiles can be deleted. Deleting the active user profile is rejected.
+Deleting an inactive user profile removes every stored selection referring to
+it so those characters return to Automatic. Deletion never leaves a selection
+pointing at missing data.
 
 ## Lifecycle And Callback Contract
 
-Profile switching is a bulk data change:
+Any active-root switch is a bulk data change:
 
-- `profileDB:SetData()` fires LibSimpleDB `OnDataChanged`.
+- `activeDB:SetData()` fires LibSimpleDB `OnDataChanged`.
 - It does not synthesize per-path callbacks.
-- Cached consumers must perform a full settings refresh after a profile switch.
+- Cached consumers perform a full settings refresh after a switch.
 
-The companion provides explicit lifecycle callbacks with stable snapshot
-dispatch and error isolation:
+The companion provides stable-snapshot, error-isolated lifecycle callbacks:
 
 ```text
-OnProfileChanged(manager, newName, oldName)
-OnProfileCreated(manager, name)
-OnProfileCopied(manager, sourceName, destinationName, overwritten)
-OnProfileRenamed(manager, oldName, newName)
-OnProfileDeleted(manager, name)
-OnProfileReset(manager, name)
+OnProfileChanged(manager, newSelectedProfile, oldSelectedProfile,
+    newActiveProfile, oldActiveProfile)
+OnProfileCreated(manager, profile)
+OnProfileCopied(manager, sourceProfile, destinationProfile, overwritten)
+OnProfileRenamed(manager, oldProfile, newProfile)
+OnProfileDeleted(manager, profile)
+OnProfileReset(manager, profile)
 ```
 
-`OnProfileChanged` fires after `profileDB:SetData()` and the resulting
-LibSimpleDB `OnDataChanged`. It is the documented source of truth for
-profile-aware UI and other consumers that care which profile is active.
+Callback profile arguments are detached descriptors. `OnProfileChanged` fires
+whenever the selected or active profile changes. When the active table changes,
+it fires after `activeDB:SetData()` and the resulting LibSimpleDB
+`OnDataChanged`. It is the single source of truth for UI that manages or
+displays profiles.
 
-Consumers that only care that the database root changed, and do not care about
-profile semantics, should listen to LibSimpleDB's `OnDataChanged`. Consumers
-should not listen to both events for the same refresh path, which would refresh
-twice for one switch.
+Resetting the selected Automatic profile may dispatch `OnProfileReset` for the
+active permanent profile followed by `OnProfileChanged` when Automatic falls
+to another permanent profile.
+
+Features that care only that effective data changed, and not profile identity,
+listen to the active LibSimpleDB instance's `OnDataChanged`. They do not also
+listen to `OnProfileChanged` for the same refresh path.
 
 ## Ownership And Validation
 
-- Retain the outer storage table by reference for SavedVariables persistence.
-- Validate and normalize `global`, every keyed scope container, `profiles`, and
-  `profileKeys` before exposing database instances.
-- Selection and scope keys must be supplied by the consumer and must be
-  non-empty strings.
-- Stored profile values must follow LibSimpleDB's SavedVariables-compatible
-  data model.
-- Never create references between profiles or cycles involving the outer
-  storage container.
+- Retain the outer consumer storage table by reference for persistence.
+- Require account-wide `SavedVariables`, not `SavedVariablesPerCharacter`.
+- Copy defaults through LibSimpleDB; never insert them into raw profile data.
+- Normalize every current permanent profile table during construction.
+- Normalize the user-profile and selection containers before resolution.
+- Repair or remove malformed stored selections before exposing the active DB.
+- Never derive canonical identity from localized display names.
+- Never use a display name as a permanent profile's storage identity.
+- Never create cross-profile, cross-addon, or outer-container reference cycles.
+- Stored values follow LibSimpleDB's SavedVariables-compatible data model.
 
 ## Migration
 
-An existing flat database cannot become its own nested profile because that
-would create a SavedVariables cycle:
+An existing flat database cannot become its own nested permanent profile
+because that would create a SavedVariables cycle:
 
 ```lua
 -- Invalid
-oldData.profiles.Default = oldData
+oldData.global = oldData
 ```
 
 Migration requires a new outer container:
@@ -395,23 +551,20 @@ Migration requires a new outer container:
 local oldData = MyAddonDB
 
 MyAddonDB = {
-    global = {},
+    global = oldData,
     realms = {},
     characters = {},
     classes = {},
     specs = {},
     factions = {},
-    profiles = {
-        Default = oldData,
-    },
-    profileKeys = {
-        [selectionKey] = "Default",
-    },
+    profiles = {},
+    selections = {},
 }
 ```
 
-Migration must run before the companion exposes either scope DB. Each consumer
-addon owns its schema version and migration from addon-specific legacy data.
+Each consumer owns its schema version and decides whether legacy data belongs
+in Global, a user profile, or another permanent profile. Migration runs before
+the companion exposes the active database.
 
 ## Dependency And Packaging
 
@@ -423,9 +576,9 @@ Libs\LibSimpleDB-2.0\embed.xml
 Libs\LibSimpleDBProfiles-1.0\embed.xml
 ```
 
-The companion source must fail clearly when `LibSimpleDB-2.0` or its required
-minor is unavailable. Consumer packages should pin reviewed Git tags for both
-libraries rather than copying working-tree source manually.
+The companion fails clearly when `LibSimpleDB-2.0` or its required minor is
+unavailable. Consumer packages pin reviewed Git tags for both libraries rather
+than copying working-tree source manually.
 
 ## Planned Repository Layout
 
@@ -445,32 +598,51 @@ LibSimpleDBProfiles/
     libstub.lua
 ```
 
-The scaffold phase will add `.editorconfig` and `.gitattributes` with UTF-8,
-LF, final-newline, spaces-only policy before source files are created.
+The scaffold phase adds `.editorconfig` and `.gitattributes` with UTF-8, LF,
+final-newline, and spaces-only policy before source files are created.
 
 ## Test Plan
 
 - Constructor validation and first-load storage normalization
-- Default profile creation and selection-key mapping
-- Stable DB object identities for all seven scopes across profile and scope-key
-  changes
-- Realm, character, class, spec, and faction key isolation and rebinding
-- Required selection/scope-key validation and explicit setter behavior
-- Isolation of raw overrides between profiles
-- Shared instance defaults without materializing them into each profile
+- Account-wide SavedVariables contract documentation
+- Canonical nonlocalized realm, character, class, spec, and faction keys
+- Localized permanent-profile display names that never become storage keys
+- Failure behavior when required player identity is unavailable
+- Independent managers and SavedVariables containers for two consumer addons
+- No consumer profile data retained on the shared LibStub library table
+- Unified descriptors for Automatic, permanent, and user profiles
+- Descriptor selected/active states, capability flags, and detached reference
+  snapshots
+- Automatic `Character > Specialization > Class > Realm > Faction > Global`
+  resolution using non-empty raw data
+- Global fallback when every permanent profile is empty
+- Whole-database selection with no per-path merging
+- Stable active DB identity across every profile change
+- Forced permanent, forced user, and return-to-Automatic persistence
+- Specialization changes in Automatic, forced Specialization, other permanent,
+  and user-profile modes
+- User profile names colliding with reserved current display names
+- Future/localized display-name collision disambiguation through typed refs
+- User profile creation through a missing user reference passed to
+  `SetProfile()`
+- Copy between permanent and user profiles without aliasing
+- Explicit copy overwrite and invalid Automatic destination behavior
+- Permanent and user reset behavior
+- Automatic reset fallthrough to a less-specific permanent profile
+- Explicit reset-and-return-to-Automatic behavior
+- Permanent rename/delete rejection
+- Active user-profile deletion rejection
+- Stored selection repair after user-profile rename or deletion
 - Same-profile selection no-op behavior
-- Selection-key changes that resolve to the same or a different profile
-- Profile creation, copy without aliasing, reset, rename, and deletion
-- Explicit copy overwrite and rename conflict behavior
-- Profile-name normalization, case sensitivity, and unrestricted length
-- Active-profile rename and deletion behavior
-- Every `profileKeys` mapping updated by rename/delete operations
-- `OnDataChanged` and companion lifecycle ordering and arguments
-- No path callbacks synthesized during switching or bulk operations
-- Existing path callback registrations remain active after switching
+- `OnDataChanged` and `OnProfileChanged` ordering and arguments
+- No path callbacks synthesized during root switches or bulk operations
 - Callback mutation snapshots and error isolation
+- UTF-8 user profile names in Chinese, Japanese, Korean, Cyrillic, Arabic, and
+  accented Latin scripts
+- Invalid UTF-8, ASCII controls, whitespace normalization, case sensitivity,
+  and unrestricted user-profile name length
 - Reload persistence using the documented storage schema
-- Flat-database migration without cycles or shared profile tables
+- Flat-database migration without cycles or shared tables
 - Actual `LibSimpleDB-2.0` dependency with both embedded load orders where valid
 - Same-family companion minor upgrades before and after manager creation
 - Multiple embedded copies and lower/newer companion minors
@@ -478,39 +650,53 @@ LF, final-newline, spaces-only policy before source files are created.
 
 ## Performance Scope
 
-No standalone benchmark suite is required. Profile and scope changes are
-infrequent operations that consumers perform outside combat-sensitive hot
-paths. The direct scoped LibSimpleDB objects keep ordinary reads outside the
-companion library.
+No standalone benchmark suite is required. Profile selection and management are
+infrequent operations outside combat-sensitive hot paths. The stable active
+LibSimpleDB instance keeps ordinary reads outside the companion.
 
 ## Implementation Sequence
 
-1. Keep the resolved contracts below synchronized with API documentation and
-   tests.
-2. Scaffold the repository text policy, license, metadata, LibStub declaration,
-   and dependency check.
-3. Write API documentation and storage/lifecycle tests before implementation.
-4. Implement storage normalization and stable scope database construction.
-5. Implement profile selection and lifecycle dispatch.
-6. Implement create, copy, reset, rename, and delete operations.
-7. Add migrations and real tagged-dependency integration tests.
-8. Smoke-test at least one existing LibSimpleDB consumer migrated to profiles.
-9. Review, tag `1.0.0`, then pin the companion from migrated consumers.
+1. Keep the resolved contracts synchronized with API documentation and tests.
+2. Scaffold repository text policy, license, metadata, LibStub declaration, and
+   dependency check.
+3. Write API documentation and storage/profile tests before implementation.
+4. Implement storage normalization and canonical permanent-profile identity.
+5. Implement profile references, descriptors, and capability validation.
+6. Implement Automatic resolution and the stable active database.
+7. Implement unified profile selection and lifecycle dispatch.
+8. Implement user create, copy, reset, rename, and delete operations.
+9. Add specialization-change handling, migrations, and tagged-dependency tests.
+10. Smoke-test two independent consumers and one migrated LibSimpleDB consumer.
+11. Review, tag `1.0.0`, then pin the companion from migrated consumers.
 
 ## Resolved Contract Decisions
 
-- `SetProfile(name)` creates a missing profile.
-- `selectionKey` is required and changes only through `SetSelectionKey(key)`.
-- Profile names use the documented normalization, remain case-sensitive, and
-  have no library-level length limit.
-- `CopyProfile()` requires explicit overwrite intent for an existing
-  destination.
-- `RenameProfile()` never overwrites an existing destination.
-- Deleting the active profile is rejected.
-- `OnProfileChanged` is authoritative for profile-aware refreshes;
-  LibSimpleDB `OnDataChanged` is authoritative for profile-agnostic data-root
+- Profile is the only public selection concept; internal scopes are presented as
+  permanent profiles.
+- Permanent profiles are Character, Specialization, Class, Realm, Faction, and
+  Global.
+- Permanent profiles can be empty, selected, modified, copied, and reset, but
+  never renamed or deleted.
+- Automatic is a virtual permanent profile and owns no data table.
+- Automatic priority is Character, Specialization, Class, Realm, Faction, then
+  Global.
+- Automatic skips empty permanent profiles except Global.
+- Automatic resolution selects one complete database and never merges less-
+  specific profiles per path.
+- A forced profile remains selected when reset; Automatic falls through after
+  its active profile becomes empty.
+- `SetProfile()` is the only selection endpoint and accepts typed references.
+- Profile descriptors expose capabilities for consumer UI generation.
+- Every consumer owns an independent account-wide SavedVariables container.
+- The library derives canonical, nonlocalized permanent-profile storage keys.
+- User profile names are normalized UTF-8 keys and may use any language.
+- Typed references prevent permanent/user display-name collisions from
+  selecting incorrect data.
+- User profile copy requires explicit overwrite intent; rename never
+  overwrites.
+- Permanent and Automatic deletion are rejected; deleting the active user
+  profile is rejected.
+- `OnProfileChanged` is authoritative for profile-aware UI refreshes.
+- LibSimpleDB `OnDataChanged` is authoritative for profile-agnostic data-root
   refreshes.
-- Version 1.0 supports global, realm, character, class, spec, faction, and
-  profile scopes.
-- Benchmarks are not a release requirement because profile and scope changes
-  are infrequent cold-path operations.
+- Benchmarks are not a release requirement.
