@@ -76,6 +76,24 @@ Selecting a valid missing user profile creates and selects it atomically.
 See [API.md](API.md) for the complete contract and [PLAN.md](PLAN.md) for the
 design rationale and storage model.
 
+## Reading The Source
+
+The implementation uses three identity terms consistently:
+
+- `profileRef` is selectable and relative to a character, such as `spec`.
+- `profileID` is exact, such as specialization `262`.
+- `payload` is the consumer-owned raw overrides table for one exact profile.
+
+`embed.xml` is also the implementation reading order:
+
+| Files | Responsibility |
+|---|---|
+| `LibSimpleDBProfiles-1.0.lua` | Reserve the LibStub minor, preserve prototypes, and initialize weak live-object registries. |
+| `Internal/Util.lua` through `Internal/Descriptors.lua` | Define shared values, identity resolution, storage normalization, migrations, and detached public snapshots. |
+| `Manager.lua` and `Operations.lua` | Construct managers, bind the stable LibSimpleDB object, select profiles, and perform ordinary mutations. |
+| `Admin.lua` and `Events.lua` | Provide exact-ID/offline administration and follow explicitly selected specialization profiles. |
+| `Library.lua` | Publish the public library only after every preceding module loaded successfully. |
+
 ## Tests
 
 Run from the repository root with Lua 5.1 and the sibling LibSimpleDB checkout:

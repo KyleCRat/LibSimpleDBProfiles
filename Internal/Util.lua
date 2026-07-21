@@ -1,6 +1,8 @@
+-- Shared SavedVariables, profile-name, callback, and identity helpers.
+local BUILD_MINOR = 1
 local lib = LibStub("LibSimpleDBProfiles-1.0", true)
 
-if not lib or lib._buildingMinor ~= 1 then
+if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then
     return
 end
 
@@ -16,6 +18,33 @@ local stringChar = string.char
 local tableConcat = table.concat
 local type = type
 
+local INTERNAL_CALLER_ERROR_LEVEL = 3
+local ASCII_MAX_BYTE = 0x7F
+local ASCII_CONTROL_MAX_BYTE = 0x1F
+local ASCII_DELETE_BYTE = 0x7F
+local ASCII_TAB_BYTE = 0x09
+local ASCII_CARRIAGE_RETURN_BYTE = 0x0D
+local ASCII_SPACE_BYTE = 0x20
+local UTF8_CONTINUATION_MIN_BYTE = 0x80
+local UTF8_CONTINUATION_MAX_BYTE = 0xBF
+local UTF8_TWO_BYTE_LEAD_MIN = 0xC2
+local UTF8_TWO_BYTE_LEAD_MAX = 0xDF
+local UTF8_THREE_BYTE_LOW_LEAD = 0xE0
+local UTF8_THREE_BYTE_LOW_SECOND_MIN = 0xA0
+local UTF8_THREE_BYTE_GENERAL_LOW_MIN = 0xE1
+local UTF8_THREE_BYTE_GENERAL_LOW_MAX = 0xEC
+local UTF8_THREE_BYTE_HIGH_LEAD = 0xED
+local UTF8_THREE_BYTE_HIGH_SECOND_MAX = 0x9F
+local UTF8_THREE_BYTE_GENERAL_HIGH_MIN = 0xEE
+local UTF8_THREE_BYTE_GENERAL_HIGH_MAX = 0xEF
+local UTF8_FOUR_BYTE_LOW_LEAD = 0xF0
+local UTF8_FOUR_BYTE_LOW_SECOND_MIN = 0x90
+local UTF8_FOUR_BYTE_GENERAL_MIN = 0xF1
+local UTF8_FOUR_BYTE_GENERAL_MAX = 0xF3
+local UTF8_FOUR_BYTE_HIGH_LEAD = 0xF4
+local UTF8_FOUR_BYTE_HIGH_SECOND_MAX = 0x8F
+
+-- These are the only lifecycle event names accepted by manager registration.
 Internal.lifecycleEvents = {
     OnCharacterForgotten = true,
     OnCharacterInfoChanged = true,
@@ -28,9 +57,11 @@ Internal.lifecycleEvents = {
     OnProfileReset = true,
 }
 
-function Internal.ClearTable(tbl)
-    for key in pairs(tbl) do
-        tbl[key] = nil
+-- SavedVariables-safe value handling
+
+function Internal.ClearTable(tableValue)
+    for key in pairs(tableValue) do
+        tableValue[key] = nil
     end
 end
 
@@ -38,12 +69,12 @@ function Internal.IsPositiveInteger(value)
     return type(value) == "number" and value > 0 and value == math.floor(value)
 end
 
-local function isStorageKey(key)
+local function isSavedVariablesKey(key)
     local keyType = type(key)
     return keyType == "string" or (keyType == "number" and key == key)
 end
 
-local function copyValue(value, ancestors, errorLevel)
+local function copyValue(value, activeAncestors, callerErrorLevel)
     local valueType = type(value)
 
     if valueType == "nil" or valueType == "boolean" or valueType == "number" or valueType == "string" then
@@ -51,36 +82,36 @@ local function copyValue(value, ancestors, errorLevel)
     end
 
     if valueType ~= "table" then
-        error("LibSimpleDBProfiles: values must be SavedVariables-compatible primitives or tables", errorLevel)
+        error("LibSimpleDBProfiles: values must be SavedVariables-compatible primitives or tables", callerErrorLevel)
     end
 
-    ancestors = ancestors or {}
+    activeAncestors = activeAncestors or {}
 
-    if ancestors[value] then
-        error("LibSimpleDBProfiles: cyclic tables are not supported", errorLevel)
+    if activeAncestors[value] then
+        error("LibSimpleDBProfiles: cyclic tables are not supported", callerErrorLevel)
     end
 
-    ancestors[value] = true
+    activeAncestors[value] = true
 
-    local copy = {}
+    local copiedTable = {}
 
-    for key, child in pairs(value) do
-        if not isStorageKey(key) then
-            error("LibSimpleDBProfiles: table keys must be strings or numbers", errorLevel)
+    for key, childValue in pairs(value) do
+        if not isSavedVariablesKey(key) then
+            error("LibSimpleDBProfiles: table keys must be strings or numbers", callerErrorLevel)
         end
 
-        copy[key] = copyValue(child, ancestors, errorLevel)
+        copiedTable[key] = copyValue(childValue, activeAncestors, callerErrorLevel)
     end
 
-    ancestors[value] = nil
-    return copy
+    activeAncestors[value] = nil
+    return copiedTable
 end
 
 function Internal.CopyValue(value)
-    return copyValue(value, nil, 3)
+    return copyValue(value, nil, INTERNAL_CALLER_ERROR_LEVEL)
 end
 
-local function validateValue(value, ancestors, errorLevel)
+local function validateValue(value, activeAncestors, callerErrorLevel)
     local valueType = type(value)
 
     if valueType == "nil" or valueType == "boolean" or valueType == "number" or valueType == "string" then
@@ -88,36 +119,36 @@ local function validateValue(value, ancestors, errorLevel)
     end
 
     if valueType ~= "table" then
-        error("LibSimpleDBProfiles: values must be SavedVariables-compatible primitives or tables", errorLevel)
+        error("LibSimpleDBProfiles: values must be SavedVariables-compatible primitives or tables", callerErrorLevel)
     end
 
-    if ancestors[value] then
-        error("LibSimpleDBProfiles: cyclic tables are not supported", errorLevel)
+    if activeAncestors[value] then
+        error("LibSimpleDBProfiles: cyclic tables are not supported", callerErrorLevel)
     end
 
-    ancestors[value] = true
+    activeAncestors[value] = true
 
-    for key, child in pairs(value) do
-        if not isStorageKey(key) then
-            error("LibSimpleDBProfiles: table keys must be strings or numbers", errorLevel)
+    for key, childValue in pairs(value) do
+        if not isSavedVariablesKey(key) then
+            error("LibSimpleDBProfiles: table keys must be strings or numbers", callerErrorLevel)
         end
 
-        validateValue(child, ancestors, errorLevel)
+        validateValue(childValue, activeAncestors, callerErrorLevel)
     end
 
-    ancestors[value] = nil
+    activeAncestors[value] = nil
 end
 
 function Internal.ValidateValue(value)
-    validateValue(value, {}, 3)
+    validateValue(value, {}, INTERNAL_CALLER_ERROR_LEVEL)
     return value
 end
 
 function Internal.ReplaceTable(destination, source)
-    local copy = Internal.CopyValue(source)
+    local copiedSource = Internal.CopyValue(source)
     Internal.ClearTable(destination)
 
-    for key, value in pairs(copy) do
+    for key, value in pairs(copiedSource) do
         destination[key] = value
     end
 
@@ -148,10 +179,10 @@ function Internal.DeepEqual(left, right)
     return true
 end
 
-function Internal.SortedKeys(tbl)
+function Internal.SortedKeys(tableValue)
     local keys = {}
 
-    for key in pairs(tbl) do
+    for key in pairs(tableValue) do
         keys[#keys + 1] = key
     end
 
@@ -162,8 +193,26 @@ function Internal.SortedKeys(tbl)
     return keys
 end
 
+-- UTF-8 profile-name validation and normalization. Hex constants mirror the
+-- Unicode scalar-value ranges and make the special E0, ED, F0, and F4 cases
+-- visible without requiring readers to decode decimal byte values.
+
+local function isByteInRange(byte, minimum, maximum)
+    return byte and byte >= minimum and byte <= maximum
+end
+
 local function isContinuation(byte)
-    return byte and byte >= 128 and byte <= 191
+    return isByteInRange(byte, UTF8_CONTINUATION_MIN_BYTE, UTF8_CONTINUATION_MAX_BYTE)
+end
+
+local function hasContinuationBytes(value, firstIndex, count)
+    for offset = 0, count - 1 do
+        if not isContinuation(stringByte(value, firstIndex + offset)) then
+            return false
+        end
+    end
+
+    return true
 end
 
 function Internal.IsValidUTF8(value)
@@ -173,61 +222,66 @@ function Internal.IsValidUTF8(value)
     while index <= length do
         local first = stringByte(value, index)
 
-        if first <= 127 then
+        if first <= ASCII_MAX_BYTE then
             index = index + 1
-        elseif first >= 194 and first <= 223 then
-            if not isContinuation(stringByte(value, index + 1)) then
+        elseif isByteInRange(first, UTF8_TWO_BYTE_LEAD_MIN, UTF8_TWO_BYTE_LEAD_MAX) then
+            if not hasContinuationBytes(value, index + 1, 1) then
                 return false
             end
 
             index = index + 2
-        elseif first == 224 then
+        elseif first == UTF8_THREE_BYTE_LOW_LEAD then
             local second = stringByte(value, index + 1)
 
-            if not second or second < 160 or second > 191 or not isContinuation(stringByte(value, index + 2)) then
+            if not isByteInRange(second, UTF8_THREE_BYTE_LOW_SECOND_MIN, UTF8_CONTINUATION_MAX_BYTE)
+                or not hasContinuationBytes(value, index + 2, 1) then
                 return false
             end
 
             index = index + 3
-        elseif (first >= 225 and first <= 236) or (first >= 238 and first <= 239) then
-            if not isContinuation(stringByte(value, index + 1))
-                or not isContinuation(stringByte(value, index + 2)) then
+        elseif isByteInRange(
+            first,
+            UTF8_THREE_BYTE_GENERAL_LOW_MIN,
+            UTF8_THREE_BYTE_GENERAL_LOW_MAX
+        ) or isByteInRange(
+            first,
+            UTF8_THREE_BYTE_GENERAL_HIGH_MIN,
+            UTF8_THREE_BYTE_GENERAL_HIGH_MAX
+        ) then
+            if not hasContinuationBytes(value, index + 1, 2) then
                 return false
             end
 
             index = index + 3
-        elseif first == 237 then
+        elseif first == UTF8_THREE_BYTE_HIGH_LEAD then
             local second = stringByte(value, index + 1)
 
-            if not second or second < 128 or second > 159 or not isContinuation(stringByte(value, index + 2)) then
+            if not isByteInRange(second, UTF8_CONTINUATION_MIN_BYTE, UTF8_THREE_BYTE_HIGH_SECOND_MAX)
+                or not hasContinuationBytes(value, index + 2, 1) then
                 return false
             end
 
             index = index + 3
-        elseif first == 240 then
+        elseif first == UTF8_FOUR_BYTE_LOW_LEAD then
             local second = stringByte(value, index + 1)
 
-            if not second or second < 144 or second > 191
-                or not isContinuation(stringByte(value, index + 2))
-                or not isContinuation(stringByte(value, index + 3)) then
+            if not isByteInRange(second, UTF8_FOUR_BYTE_LOW_SECOND_MIN, UTF8_CONTINUATION_MAX_BYTE)
+                or not hasContinuationBytes(value, index + 2, 2) then
                 return false
             end
 
             index = index + 4
-        elseif first >= 241 and first <= 243 then
-            if not isContinuation(stringByte(value, index + 1))
-                or not isContinuation(stringByte(value, index + 2))
-                or not isContinuation(stringByte(value, index + 3)) then
+        elseif isByteInRange(first, UTF8_FOUR_BYTE_GENERAL_MIN, UTF8_FOUR_BYTE_GENERAL_MAX) then
+            if not hasContinuationBytes(value, index + 1, 3) then
                 return false
             end
 
             index = index + 4
-        elseif first == 244 then
+        elseif first == UTF8_FOUR_BYTE_HIGH_LEAD then
             local second = stringByte(value, index + 1)
 
-            if not second or second < 128 or second > 143
-                or not isContinuation(stringByte(value, index + 2))
-                or not isContinuation(stringByte(value, index + 3)) then
+            if not isByteInRange(second, UTF8_CONTINUATION_MIN_BYTE, UTF8_FOUR_BYTE_HIGH_SECOND_MAX)
+                or not hasContinuationBytes(value, index + 2, 2) then
                 return false
             end
 
@@ -241,19 +295,20 @@ function Internal.IsValidUTF8(value)
 end
 
 local function isASCIIWhitespace(byte)
-    return byte == 32 or (byte >= 9 and byte <= 13)
+    return byte == ASCII_SPACE_BYTE
+        or isByteInRange(byte, ASCII_TAB_BYTE, ASCII_CARRIAGE_RETURN_BYTE)
 end
 
 function Internal.NormalizeProfileName(value, operation)
     if type(value) ~= "string" then
-        error(("Usage: manager:%s(...) requires a string profile name"):format(operation), 3)
+        error(("Usage: manager:%s(...) requires a string profile name"):format(operation), INTERNAL_CALLER_ERROR_LEVEL)
     end
 
     if not Internal.IsValidUTF8(value) then
         return nil, "INVALID_NAME"
     end
 
-    local normalized = {}
+    local normalizedBytes = {}
     local hasContent = false
     local pendingSpace = false
 
@@ -264,15 +319,15 @@ function Internal.NormalizeProfileName(value, operation)
             if hasContent then
                 pendingSpace = true
             end
-        elseif byte < 32 or byte == 127 then
+        elseif byte <= ASCII_CONTROL_MAX_BYTE or byte == ASCII_DELETE_BYTE then
             return nil, "INVALID_NAME"
         else
             if pendingSpace then
-                normalized[#normalized + 1] = " "
+                normalizedBytes[#normalizedBytes + 1] = " "
                 pendingSpace = false
             end
 
-            normalized[#normalized + 1] = stringChar(byte)
+            normalizedBytes[#normalizedBytes + 1] = stringChar(byte)
             hasContent = true
         end
     end
@@ -281,26 +336,28 @@ function Internal.NormalizeProfileName(value, operation)
         return nil, "INVALID_NAME"
     end
 
-    return tableConcat(normalized)
+    return tableConcat(normalizedBytes)
 end
 
-function Internal.ReportCallbackError(message)
+-- Lifecycle callback dispatch
+
+function Internal.ReportCallbackError(errorMessage)
     if type(getErrorHandler) ~= "function" then
         return
     end
 
-    local ok, handler = pcall(getErrorHandler)
+    local ok, errorHandler = pcall(getErrorHandler)
 
-    if ok and type(handler) == "function" then
-        pcall(handler, message)
+    if ok and type(errorHandler) == "function" then
+        pcall(errorHandler, errorMessage)
     end
 end
 
 function Internal.CallSafely(callback, ...)
-    local ok, message = pcall(callback, ...)
+    local ok, errorMessage = pcall(callback, ...)
 
     if not ok then
-        Internal.ReportCallbackError(message)
+        Internal.ReportCallbackError(errorMessage)
     end
 end
 
@@ -311,18 +368,21 @@ function Internal.DispatchLifecycle(manager, event, ...)
         return
     end
 
-    local snapshot = {}
+    local callbackSnapshot = {}
 
     for callback in pairs(callbacks) do
-        snapshot[#snapshot + 1] = callback
+        callbackSnapshot[#callbackSnapshot + 1] = callback
     end
 
-    for index = 1, #snapshot do
-        Internal.CallSafely(snapshot[index], manager, event, ...)
+    for index = 1, #callbackSnapshot do
+        Internal.CallSafely(callbackSnapshot[index], manager, event, ...)
     end
 end
 
-function Internal.ProfileIdentityEqual(left, right)
+-- profileID values include exact permanent keys; profileRef values intentionally
+-- omit those keys and resolve relative to a character.
+
+function Internal.ProfileIDEqual(left, right)
     if left == right then
         return true
     end

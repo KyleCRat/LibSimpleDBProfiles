@@ -1,96 +1,111 @@
+-- Implement current-manager profile mutations that accept selectable
+-- profileRef values.
+local BUILD_MINOR = 1
 local lib = LibStub("LibSimpleDBProfiles-1.0", true)
 
-if not lib or lib._buildingMinor ~= 1 then
+if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then
     return
 end
 
 local Internal = lib._internal
-local methods = Internal.managerPrototype
+local Manager = Internal.managerPrototype
 
 local error = error
 local pairs = pairs
 
-local function resolveOrdinaryProfile(manager, profileRef, operation)
-    local normalized, errorCode = Internal.NormalizeProfileRef(profileRef, operation)
+local METHOD_ERROR_LEVEL = 2
 
-    if not normalized then
+local function resolveSelectableProfile(manager, profileRef, operation)
+    local normalizedRef, errorCode = Internal.NormalizeProfileRef(profileRef, operation)
+
+    if not normalizedRef then
         return nil, nil, nil, errorCode
     end
 
-    local profileID = Internal.ResolveProfileRef(normalized, manager._identity.guid, manager._identity)
+    local profileID = Internal.ResolveProfileRef(
+        normalizedRef,
+        manager._identity.guid,
+        manager._identity
+    )
 
     if not profileID then
-        return normalized, nil, nil, "PROFILE_NOT_FOUND"
+        return normalizedRef, nil, nil, "PROFILE_NOT_FOUND"
     end
 
-    return normalized, profileID, Internal.GetProfileData(manager._storage, profileID)
+    return normalizedRef,
+        profileID,
+        Internal.GetProfilePayload(manager._storage, profileID)
 end
 
-function methods:CreateProfile(name)
-    local normalized, errorCode = Internal.NormalizeProfileName(name, "CreateProfile")
+function Manager:CreateProfile(name)
+    local normalizedName, errorCode = Internal.NormalizeProfileName(name, "CreateProfile")
 
-    if not normalized then
+    if not normalizedName then
         return nil, errorCode
     end
 
-    if self._storage.profiles[normalized] then
+    if self._storage.profiles[normalizedName] then
         return nil, "PROFILE_EXISTS"
     end
 
-    local profileRef = { kind = "user", name = normalized }
-    local profileID = { kind = "user", name = normalized }
-    self._storage.profiles[normalized] = {}
-    Internal.DispatchLifecycle(self, "OnProfileCreated", Internal.ProfileSnapshot(self, profileID, false))
+    -- User profileRef and profileID shapes are identical because they do not
+    -- depend on character identity.
+    local profileRef = { kind = "user", name = normalizedName }
+    self._storage.profiles[normalizedName] = {}
+    Internal.DispatchLifecycle(self, "OnProfileCreated", Internal.BuildProfileDescriptor(self, profileRef, false))
     return profileRef
 end
 
-function methods:CopyProfile(sourceRef, destinationRef)
-    local normalizedSource, sourceID, sourceData, sourceError = resolveOrdinaryProfile(
+function Manager:CopyProfile(sourceRef, destinationRef)
+    local normalizedSourceRef, sourceProfileID, sourcePayload, sourceErrorCode = resolveSelectableProfile(
         self,
         sourceRef,
         "manager:CopyProfile source"
     )
 
-    if not normalizedSource then
-        return nil, sourceError
+    if not normalizedSourceRef then
+        return nil, sourceErrorCode
     end
 
-    local normalizedDestination, destinationID, destinationData, destinationError = resolveOrdinaryProfile(
+    local normalizedDestinationRef,
+        destinationProfileID,
+        destinationPayload,
+        destinationErrorCode = resolveSelectableProfile(
         self,
         destinationRef,
         "manager:CopyProfile destination"
     )
 
-    if not normalizedDestination or not destinationID then
-        return nil, destinationError
+    if not normalizedDestinationRef or not destinationProfileID then
+        return nil, destinationErrorCode
     end
 
-    if not sourceData then
-        return nil, sourceError or "PROFILE_NOT_FOUND"
+    if not sourcePayload then
+        return nil, sourceErrorCode or "PROFILE_NOT_FOUND"
     end
 
-    if Internal.ProfileIdentityEqual(sourceID, destinationID) then
-        return Internal.ProfileSnapshot(self, destinationID, false), false
+    if Internal.ProfileIDEqual(sourceProfileID, destinationProfileID) then
+        return Internal.BuildProfileDescriptor(self, destinationProfileID, false), false
     end
 
-    local copiedData = Internal.CopyValue(sourceData)
-    local destinationWasMissing = destinationData == nil
+    local copiedPayload = Internal.CopyValue(sourcePayload)
+    local destinationWasMissing = destinationPayload == nil
 
-    if destinationWasMissing and normalizedDestination.kind ~= "user" then
+    if destinationWasMissing and normalizedDestinationRef.kind ~= "user" then
         return nil, "PROFILE_NOT_FOUND"
     end
 
-    local overwritten = destinationData ~= nil and next(destinationData) ~= nil
-    local sourceDescriptor = Internal.ProfileSnapshot(self, sourceID, false)
+    local overwritten = destinationPayload ~= nil and next(destinationPayload) ~= nil
+    local sourceDescriptor = Internal.BuildProfileDescriptor(self, sourceProfileID, false)
 
-    Internal.SetProfileData(self._storage, destinationID, copiedData)
+    Internal.SetProfilePayload(self._storage, destinationProfileID, copiedPayload)
 
-    if Internal.ProfileIdentityEqual(self._activeProfileID, destinationID) then
-        self._activeData = copiedData
-        self._activeDB:SetData(copiedData)
+    if Internal.ProfileIDEqual(self._activeProfileID, destinationProfileID) then
+        self._activePayload = copiedPayload
+        self._activeDB:SetData(copiedPayload)
     end
 
-    local destinationDescriptor = Internal.ProfileSnapshot(self, destinationID, false)
+    local destinationDescriptor = Internal.BuildProfileDescriptor(self, destinationProfileID, false)
 
     if destinationWasMissing then
         Internal.DispatchLifecycle(self, "OnProfileCreated", destinationDescriptor)
@@ -106,43 +121,43 @@ function methods:CopyProfile(sourceRef, destinationRef)
     return destinationDescriptor, overwritten
 end
 
-function methods:ResetProfile(profileRef)
+function Manager:ResetProfile(profileRef)
     local profileID
-    local data
+    local profilePayload
 
     if profileRef == nil then
         profileID = Internal.CopyValue(self._activeProfileID)
-        data = self._activeData
+        profilePayload = self._activePayload
     else
-        local normalized, errorCode
-        normalized, profileID, data, errorCode = resolveOrdinaryProfile(
+        local normalizedRef, errorCode
+        normalizedRef, profileID, profilePayload, errorCode = resolveSelectableProfile(
             self,
             profileRef,
             "manager:ResetProfile"
         )
 
-        if not normalized then
+        if not normalizedRef then
             return nil, errorCode
         end
 
-        if not data then
+        if not profilePayload then
             return nil, errorCode or "PROFILE_NOT_FOUND"
         end
     end
 
-    if Internal.ProfileIdentityEqual(self._activeProfileID, profileID) then
+    if Internal.ProfileIDEqual(self._activeProfileID, profileID) then
         self._activeDB:Reset()
     else
-        Internal.ClearTable(data)
+        Internal.ClearTable(profilePayload)
     end
 
-    local descriptor = Internal.ProfileSnapshot(self, profileID, false)
+    local descriptor = Internal.BuildProfileDescriptor(self, profileID, false)
     Internal.DispatchLifecycle(self, "OnProfileReset", descriptor)
     return descriptor
 end
 
-function methods:RenameProfile(profileRef, newName)
-    local normalizedRef, profileID, data, errorCode = resolveOrdinaryProfile(
+function Manager:RenameProfile(profileRef, newName)
+    local normalizedRef, profileID, profilePayload, errorCode = resolveSelectableProfile(
         self,
         profileRef,
         "manager:RenameProfile"
@@ -153,10 +168,10 @@ function methods:RenameProfile(profileRef, newName)
     end
 
     if normalizedRef.kind == "permanent" then
-        error("LibSimpleDBProfiles: permanent profiles cannot be renamed", 2)
+        error("LibSimpleDBProfiles: permanent profiles cannot be renamed", METHOD_ERROR_LEVEL)
     end
 
-    if not data then
+    if not profilePayload then
         return nil, errorCode or "PROFILE_NOT_FOUND"
     end
 
@@ -167,37 +182,37 @@ function methods:RenameProfile(profileRef, newName)
     end
 
     if normalizedName == normalizedRef.name then
-        return Internal.ProfileSnapshot(self, profileID, false)
+        return Internal.BuildProfileDescriptor(self, profileID, false)
     end
 
     if self._storage.profiles[normalizedName] then
         return nil, "PROFILE_EXISTS"
     end
 
-    local oldDescriptor = Internal.ProfileSnapshot(self, profileID, false)
-    local newRef = { kind = "user", name = normalizedName }
-    local newID = { kind = "user", name = normalizedName }
+    local previousDescriptor = Internal.BuildProfileDescriptor(self, profileID, false)
+    local newProfileRef = { kind = "user", name = normalizedName }
+    local newProfileID = { kind = "user", name = normalizedName }
     self._storage.profiles[normalizedRef.name] = nil
-    self._storage.profiles[normalizedName] = data
+    self._storage.profiles[normalizedName] = profilePayload
 
     for guid, selection in pairs(self._storage.selections) do
         if selection.kind == "user" and selection.name == normalizedRef.name then
-            self._storage.selections[guid] = Internal.CopyValue(newRef)
+            self._storage.selections[guid] = Internal.CopyValue(newProfileRef)
         end
     end
 
-    if Internal.ProfileIdentityEqual(self._activeProfileID, profileID) then
-        self._activeProfileRef = Internal.CopyValue(newRef)
-        self._activeProfileID = Internal.CopyValue(newID)
+    if Internal.ProfileIDEqual(self._activeProfileID, profileID) then
+        self._activeProfileRef = Internal.CopyValue(newProfileRef)
+        self._activeProfileID = Internal.CopyValue(newProfileID)
     end
 
-    local newDescriptor = Internal.ProfileSnapshot(self, newID, false)
-    Internal.DispatchLifecycle(self, "OnProfileRenamed", oldDescriptor, newDescriptor)
-    return newDescriptor
+    local currentDescriptor = Internal.BuildProfileDescriptor(self, newProfileID, false)
+    Internal.DispatchLifecycle(self, "OnProfileRenamed", previousDescriptor, currentDescriptor)
+    return currentDescriptor
 end
 
-function methods:DeleteProfile(profileRef)
-    local normalizedRef, profileID, data, errorCode = resolveOrdinaryProfile(
+function Manager:DeleteProfile(profileRef)
+    local normalizedRef, profileID, profilePayload, errorCode = resolveSelectableProfile(
         self,
         profileRef,
         "manager:DeleteProfile"
@@ -208,23 +223,23 @@ function methods:DeleteProfile(profileRef)
     end
 
     if normalizedRef.kind == "permanent" then
-        error("LibSimpleDBProfiles: permanent profiles cannot be deleted", 2)
+        error("LibSimpleDBProfiles: permanent profiles cannot be deleted", METHOD_ERROR_LEVEL)
     end
 
-    if not data then
+    if not profilePayload then
         return nil, errorCode or "PROFILE_NOT_FOUND"
     end
 
-    if Internal.ProfileIdentityEqual(self._activeProfileID, profileID) then
+    if Internal.ProfileIDEqual(self._activeProfileID, profileID) then
         return nil, "ACTIVE_PROFILE"
     end
 
-    local deletedDescriptor = Internal.ProfileSnapshot(self, profileID, false)
+    local deletedDescriptor = Internal.BuildProfileDescriptor(self, profileID, false)
     local affectedCharacters = {}
 
     for guid, selection in pairs(self._storage.selections) do
         if selection.kind == "user" and selection.name == normalizedRef.name then
-            affectedCharacters[#affectedCharacters + 1] = Internal.CharacterDescriptor(self, guid)
+            affectedCharacters[#affectedCharacters + 1] = Internal.BuildCharacterDescriptor(self, guid)
         end
     end
 
@@ -235,12 +250,12 @@ function methods:DeleteProfile(profileRef)
     self._storage.profiles[normalizedRef.name] = nil
 
     for index = 1, #affectedCharacters do
-        local character = affectedCharacters[index]
-        self._storage.selections[character.guid] = nil
+        local characterDescriptor = affectedCharacters[index]
+        self._storage.selections[characterDescriptor.guid] = nil
         Internal.DispatchLifecycle(
             self,
             "OnCharacterSelectionChanged",
-            Internal.CharacterDescriptor(self, character.guid),
+            Internal.BuildCharacterDescriptor(self, characterDescriptor.guid),
             nil,
             deletedDescriptor
         )

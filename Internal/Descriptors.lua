@@ -1,6 +1,8 @@
+-- Build detached character, profile, and usage snapshots for public callers.
+local BUILD_MINOR = 1
 local lib = LibStub("LibSimpleDBProfiles-1.0", true)
 
-if not lib or lib._buildingMinor ~= 1 then
+if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then
     return
 end
 
@@ -9,7 +11,7 @@ local Internal = lib._internal
 local pairs = pairs
 local sort = table.sort
 
-local characterFields = {
+local CHARACTER_DESCRIPTOR_FIELDS = {
     "name",
     "realmID",
     "realmName",
@@ -21,19 +23,19 @@ local characterFields = {
     "lastSeen",
 }
 
-function Internal.CharacterDescriptor(manager, guid)
+function Internal.BuildCharacterDescriptor(manager, guid)
     local storage = manager._storage
-    local info = storage.characterInfo[guid]
+    local characterInfo = storage.characterInfo[guid]
     local descriptor = {
         guid = guid,
         current = guid == manager._identity.guid,
         canForget = guid ~= manager._identity.guid,
     }
 
-    if info then
-        for index = 1, #characterFields do
-            local field = characterFields[index]
-            descriptor[field] = info[field]
+    if characterInfo then
+        for index = 1, #CHARACTER_DESCRIPTOR_FIELDS do
+            local field = CHARACTER_DESCRIPTOR_FIELDS[index]
+            descriptor[field] = characterInfo[field]
         end
     end
 
@@ -41,7 +43,7 @@ function Internal.CharacterDescriptor(manager, guid)
 
     if profileRef then
         descriptor.profileRef = Internal.CopyValue(profileRef)
-        local profileID = Internal.ResolveProfileRef(profileRef, guid, info)
+        local profileID = Internal.ResolveProfileRef(profileRef, guid, characterInfo)
 
         if profileID then
             descriptor.profileID = profileID
@@ -51,106 +53,109 @@ function Internal.CharacterDescriptor(manager, guid)
     return descriptor
 end
 
-local function sortCharacters(characters)
-    sort(characters, function(left, right)
+local function sortCharacterDescriptors(characterDescriptors)
+    sort(characterDescriptors, function(left, right)
         return left.guid < right.guid
     end)
 end
 
-function Internal.ProfileUsage(manager, profileID)
+function Internal.BuildProfileUsage(manager, profileID)
     local storage = manager._storage
-    local characters = {}
+    local selectedCharacters = {}
     local unresolvedCharacters = {}
 
     for guid, profileRef in pairs(storage.selections) do
-        local info = storage.characterInfo[guid]
-        local resolvedID = Internal.ResolveProfileRef(profileRef, guid, info)
+        local characterInfo = storage.characterInfo[guid]
+        local resolvedProfileID = Internal.ResolveProfileRef(profileRef, guid, characterInfo)
 
-        if resolvedID and Internal.ProfileIdentityEqual(resolvedID, profileID) then
-            characters[#characters + 1] = Internal.CharacterDescriptor(manager, guid)
-        elseif not resolvedID
+        if resolvedProfileID and Internal.ProfileIDEqual(resolvedProfileID, profileID) then
+            selectedCharacters[#selectedCharacters + 1] = Internal.BuildCharacterDescriptor(manager, guid)
+        elseif not resolvedProfileID
             and profileID.kind == "permanent"
             and profileRef.kind == "permanent"
             and profileRef.profile == profileID.profile then
-            unresolvedCharacters[#unresolvedCharacters + 1] = Internal.CharacterDescriptor(manager, guid)
+            unresolvedCharacters[#unresolvedCharacters + 1] = Internal.BuildCharacterDescriptor(manager, guid)
         end
     end
 
-    sortCharacters(characters)
-    sortCharacters(unresolvedCharacters)
+    sortCharacterDescriptors(selectedCharacters)
+    sortCharacterDescriptors(unresolvedCharacters)
     return {
         profileID = Internal.CopyValue(profileID),
-        profileRef = Internal.ProfileRefForID(manager, profileID),
-        selectionCount = #characters,
-        characters = characters,
+        profileRef = Internal.SelectableProfileRefForID(manager, profileID),
+        selectionCount = #selectedCharacters,
+        characters = selectedCharacters,
         unresolvedCharacters = unresolvedCharacters,
     }
 end
 
-function Internal.ProfileDescriptor(manager, profileID, includeSelectionCount)
-    local data = Internal.GetProfileData(manager._storage, profileID)
+local function buildBaseProfileDescriptor(manager, profileID, includeSelectionCount)
+    local profilePayload = Internal.GetProfilePayload(manager._storage, profileID)
 
-    if not data then
+    if not profilePayload then
         return nil
     end
 
-    local active = Internal.ProfileIdentityEqual(manager._activeProfileID, profileID)
-    local permanent = profileID.kind == "permanent"
+    local isActive = Internal.ProfileIDEqual(manager._activeProfileID, profileID)
+    local isPermanent = profileID.kind == "permanent"
     local descriptor = {
         profileID = Internal.CopyValue(profileID),
-        profileRef = Internal.ProfileRefForID(manager, profileID),
-        displayName = Internal.ProfileDisplayName(manager, profileID),
-        permanent = permanent,
-        active = active,
-        hasData = next(data) ~= nil,
+        profileRef = Internal.SelectableProfileRefForID(manager, profileID),
+        displayName = Internal.ResolveProfileDisplayName(manager, profileID),
+        permanent = isPermanent,
+        active = isActive,
+        hasData = next(profilePayload) ~= nil,
         nameCollision = false,
         canReset = true,
-        canRename = not permanent,
-        canDelete = not permanent and not active,
+        canRename = not isPermanent,
+        canDelete = not isPermanent and not isActive,
     }
 
     if includeSelectionCount then
-        descriptor.selectionCount = Internal.ProfileUsage(manager, profileID).selectionCount
+        descriptor.selectionCount = Internal.BuildProfileUsage(manager, profileID).selectionCount
     end
 
     return descriptor
 end
 
-function Internal.ProfileSnapshot(manager, profileID, includeSelectionCount)
-    local descriptor = Internal.ProfileDescriptor(manager, profileID, includeSelectionCount)
+-- Single-profile operations need collision status too, so compare the display
+-- name against either current selectable profiles or every historical ID.
+function Internal.BuildProfileDescriptor(manager, profileID, includeSelectionCount)
+    local descriptor = buildBaseProfileDescriptor(manager, profileID, includeSelectionCount)
 
     if not descriptor then
         return nil
     end
 
-    local matchingNames = 0
-    local ids
+    local matchingDisplayNameCount = 0
+    local profileIDs
 
     if includeSelectionCount then
-        ids = Internal.EnumerateProfileIDs(manager._storage)
+        profileIDs = Internal.CollectProfileIDs(manager._storage)
     else
-        ids = {}
+        profileIDs = {}
 
-        for index = 1, #Internal.permanentOrder do
-            local currentID = Internal.CurrentProfileID(manager, Internal.permanentOrder[index])
+        for index = 1, #Internal.permanentProfileOrder do
+            local profileType = Internal.permanentProfileOrder[index]
+            local currentProfileID = Internal.ResolveCurrentProfileID(manager, profileType)
 
-            if currentID then
-                ids[#ids + 1] = currentID
+            if currentProfileID then
+                profileIDs[#profileIDs + 1] = currentProfileID
             end
         end
 
-        local names = Internal.SortedKeys(manager._storage.profiles)
+        local userProfileNames = Internal.SortedKeys(manager._storage.profiles)
 
-        for index = 1, #names do
-            ids[#ids + 1] = { kind = "user", name = names[index] }
+        for index = 1, #userProfileNames do
+            profileIDs[#profileIDs + 1] = { kind = "user", name = userProfileNames[index] }
         end
     end
 
-    for index = 1, #ids do
-        if Internal.ProfileDisplayName(manager, ids[index]) == descriptor.displayName then
-            matchingNames = matchingNames + 1
+    for index = 1, #profileIDs do
+        if Internal.ResolveProfileDisplayName(manager, profileIDs[index]) == descriptor.displayName then
+            matchingDisplayNameCount = matchingDisplayNameCount + 1
 
-            if matchingNames > 1 then
+            if matchingDisplayNameCount > 1 then
                 descriptor.nameCollision = true
                 break
             end
@@ -160,52 +165,52 @@ function Internal.ProfileSnapshot(manager, profileID, includeSelectionCount)
     return descriptor
 end
 
-function Internal.ApplyNameCollisions(descriptors)
-    local counts = {}
+local function applyNameCollisions(descriptors)
+    local displayNameCounts = {}
 
     for index = 1, #descriptors do
-        local name = descriptors[index].displayName
-        counts[name] = (counts[name] or 0) + 1
+        local displayName = descriptors[index].displayName
+        displayNameCounts[displayName] = (displayNameCounts[displayName] or 0) + 1
     end
 
     for index = 1, #descriptors do
-        descriptors[index].nameCollision = counts[descriptors[index].displayName] > 1
+        descriptors[index].nameCollision = displayNameCounts[descriptors[index].displayName] > 1
     end
 
     return descriptors
 end
 
-function Internal.CurrentProfileDescriptors(manager)
+function Internal.BuildCurrentProfileDescriptors(manager)
     local descriptors = {}
 
-    for index = 1, #Internal.permanentOrder do
-        local profile = Internal.permanentOrder[index]
-        local profileID = Internal.CurrentProfileID(manager, profile)
+    for index = 1, #Internal.permanentProfileOrder do
+        local profileType = Internal.permanentProfileOrder[index]
+        local profileID = Internal.ResolveCurrentProfileID(manager, profileType)
 
         if profileID then
-            descriptors[#descriptors + 1] = Internal.ProfileDescriptor(manager, profileID, false)
+            descriptors[#descriptors + 1] = buildBaseProfileDescriptor(manager, profileID, false)
         end
     end
 
-    local names = Internal.SortedKeys(manager._storage.profiles)
+    local userProfileNames = Internal.SortedKeys(manager._storage.profiles)
 
-    for index = 1, #names do
-        descriptors[#descriptors + 1] = Internal.ProfileDescriptor(manager, {
+    for index = 1, #userProfileNames do
+        descriptors[#descriptors + 1] = buildBaseProfileDescriptor(manager, {
             kind = "user",
-            name = names[index],
+            name = userProfileNames[index],
         }, false)
     end
 
-    return Internal.ApplyNameCollisions(descriptors)
+    return applyNameCollisions(descriptors)
 end
 
-function Internal.AdminProfileDescriptors(manager)
-    local ids = Internal.EnumerateProfileIDs(manager._storage)
+function Internal.BuildAdminProfileDescriptors(manager)
+    local profileIDs = Internal.CollectProfileIDs(manager._storage)
     local descriptors = {}
 
-    for index = 1, #ids do
-        descriptors[index] = Internal.ProfileDescriptor(manager, ids[index], true)
+    for index = 1, #profileIDs do
+        descriptors[index] = buildBaseProfileDescriptor(manager, profileIDs[index], true)
     end
 
-    return Internal.ApplyNameCollisions(descriptors)
+    return applyNameCollisions(descriptors)
 end

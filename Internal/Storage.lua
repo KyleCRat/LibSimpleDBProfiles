@@ -1,6 +1,9 @@
+-- Own the private SavedVariables schema and raw payload containers. This file
+-- never applies LibSimpleDB defaults to stored profile payloads.
+local BUILD_MINOR = 1
 local lib = LibStub("LibSimpleDBProfiles-1.0", true)
 
-if not lib or lib._buildingMinor ~= 1 then
+if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then
     return
 end
 
@@ -12,10 +15,15 @@ local pairs = pairs
 local pcall = pcall
 local type = type
 
-Internal.currentStorageSchema = 1
-Internal.storageMigrations = Internal.storageMigrations or {}
+local STORAGE_ERROR_LEVEL = 3
+local STORAGE_METADATA_KEY = "__lsdbProfiles"
+local CURRENT_STORAGE_SCHEMA_VERSION = 1
+local INITIAL_PAYLOAD_VERSION = 1
 
-local rootContainers = {
+-- Future library-owned schema migrations are indexed by their source version.
+local storageMigrationsBySourceVersion = {}
+
+local TABLE_CONTAINER_KEYS = {
     "realms",
     "characters",
     "characterInfo",
@@ -26,8 +34,8 @@ local rootContainers = {
     "selections",
 }
 
-local knownRootKeys = {
-    __lsdbProfiles = true,
+local ALLOWED_STORAGE_ROOT_KEYS = {
+    [STORAGE_METADATA_KEY] = true,
     global = true,
     realms = true,
     characters = true,
@@ -39,7 +47,7 @@ local knownRootKeys = {
     selections = true,
 }
 
-local characterInfoFields = {
+local CHARACTER_INFO_FIELD_TYPES = {
     name = "string",
     realmID = "string",
     realmName = "string",
@@ -51,9 +59,9 @@ local characterInfoFields = {
     lastSeen = "number",
 }
 
-local function assertTable(value, label)
+local function requireTable(value, label)
     if type(value) ~= "table" then
-        error(("LibSimpleDBProfiles: corrupt storage: %s must be a table"):format(label), 3)
+        error(("LibSimpleDBProfiles: corrupt storage: %s must be a table"):format(label), STORAGE_ERROR_LEVEL)
     end
 
     return value
@@ -61,122 +69,169 @@ end
 
 local function validateRootKeys(storage)
     for key in pairs(storage) do
-        if not knownRootKeys[key] then
-            error(("LibSimpleDBProfiles: unrecognized unversioned storage key %q; wrap legacy data in a new profile container"):format(tostring(key)), 3)
+        if not ALLOWED_STORAGE_ROOT_KEYS[key] then
+            error(
+                ("LibSimpleDBProfiles: unrecognized unversioned storage key %q; wrap legacy data in a new profile container"):format(
+                    tostring(key)
+                ),
+                STORAGE_ERROR_LEVEL
+            )
         end
     end
 end
 
-local function validateMetadata(metadata)
-    for key in pairs(metadata) do
+local function validateMetadata(storageMetadata)
+    for key in pairs(storageMetadata) do
         if key ~= "schema" and key ~= "payloadVersion" then
-            error(("LibSimpleDBProfiles: corrupt storage: unknown metadata field %q"):format(tostring(key)), 3)
+            error(
+                ("LibSimpleDBProfiles: corrupt storage: unknown metadata field %q"):format(
+                    tostring(key)
+                ),
+                STORAGE_ERROR_LEVEL
+            )
         end
     end
 
-    if not Internal.IsPositiveInteger(metadata.schema) then
-        error("LibSimpleDBProfiles: corrupt storage: schema must be a positive integer", 3)
+    if not Internal.IsPositiveInteger(storageMetadata.schema) then
+        error("LibSimpleDBProfiles: corrupt storage: schema must be a positive integer", STORAGE_ERROR_LEVEL)
     end
 
-    if metadata.payloadVersion ~= nil and not Internal.IsPositiveInteger(metadata.payloadVersion) then
-        error("LibSimpleDBProfiles: corrupt storage: payloadVersion must be a positive integer", 3)
+    if storageMetadata.payloadVersion ~= nil
+        and not Internal.IsPositiveInteger(storageMetadata.payloadVersion) then
+        error("LibSimpleDBProfiles: corrupt storage: payloadVersion must be a positive integer", STORAGE_ERROR_LEVEL)
     end
 end
 
-local function migrateStorage(storage, metadata)
-    local currentSchema = Internal.currentStorageSchema
-
-    if metadata.schema > currentSchema then
-        error(("LibSimpleDBProfiles: storage schema %d is newer than supported schema %d"):format(metadata.schema, currentSchema), 3)
+local function runStorageMigrations(storage, storageMetadata)
+    if storageMetadata.schema > CURRENT_STORAGE_SCHEMA_VERSION then
+        error(("LibSimpleDBProfiles: storage schema %d is newer than supported schema %d"):format(
+            storageMetadata.schema,
+            CURRENT_STORAGE_SCHEMA_VERSION
+        ), STORAGE_ERROR_LEVEL)
     end
 
-    while metadata.schema < currentSchema do
-        local sourceSchema = metadata.schema
-        local migration = Internal.storageMigrations[sourceSchema]
+    while storageMetadata.schema < CURRENT_STORAGE_SCHEMA_VERSION do
+        local sourceSchemaVersion = storageMetadata.schema
+        local targetSchemaVersion = sourceSchemaVersion + 1
+        local migrationStep = storageMigrationsBySourceVersion[sourceSchemaVersion]
 
-        if type(migration) ~= "function" then
-            error(("LibSimpleDBProfiles: no storage migration from schema %d"):format(sourceSchema), 3)
+        if type(migrationStep) ~= "function" then
+            error(
+                ("LibSimpleDBProfiles: no storage migration from schema %d"):format(
+                    sourceSchemaVersion
+                ),
+                STORAGE_ERROR_LEVEL
+            )
         end
 
-        local staged = Internal.CopyValue(storage)
-        local ok, message = pcall(migration, staged)
+        local stagedStorage = Internal.CopyValue(storage)
+        local ok, message = pcall(migrationStep, stagedStorage)
 
         if not ok then
             error(("LibSimpleDBProfiles: storage migration %d to %d failed: %s"):format(
-                sourceSchema,
-                sourceSchema + 1,
+                sourceSchemaVersion,
+                targetSchemaVersion,
                 tostring(message)
-            ), 3)
+            ), STORAGE_ERROR_LEVEL)
         end
 
-        local stagedMetadata = assertTable(staged.__lsdbProfiles, "__lsdbProfiles")
-        stagedMetadata.schema = sourceSchema + 1
-        Internal.ValidateValue(staged)
-        Internal.ReplaceTable(storage, staged)
-        metadata = storage.__lsdbProfiles
+        local stagedMetadata = requireTable(stagedStorage[STORAGE_METADATA_KEY], STORAGE_METADATA_KEY)
+        stagedMetadata.schema = targetSchemaVersion
+        Internal.ValidateValue(stagedStorage)
+        Internal.ReplaceTable(storage, stagedStorage)
+        storageMetadata = storage[STORAGE_METADATA_KEY]
     end
 
-    return metadata
+    return storageMetadata
 end
 
-local function normalizeProfileMap(map, label)
-    for key, value in pairs(map) do
+local function normalizePermanentProfileContainer(profilePayloads, label)
+    for key, profilePayload in pairs(profilePayloads) do
         if type(key) ~= "string" or key == "" then
-            error(("LibSimpleDBProfiles: corrupt storage: %s keys must be non-empty strings"):format(label), 3)
+            error(
+                ("LibSimpleDBProfiles: corrupt storage: %s keys must be non-empty strings"):format(
+                    label
+                ),
+                STORAGE_ERROR_LEVEL
+            )
         end
 
-        assertTable(value, label .. "[" .. key .. "]")
-        Internal.ValidateValue(value)
+        requireTable(profilePayload, label .. "[" .. key .. "]")
+        Internal.ValidateValue(profilePayload)
     end
 end
 
 local function normalizeUserProfiles(profiles)
-    local keys = Internal.SortedKeys(profiles)
+    local storedNames = Internal.SortedKeys(profiles)
 
-    for index = 1, #keys do
-        local oldName = keys[index]
+    for index = 1, #storedNames do
+        local storedName = storedNames[index]
 
-        if type(oldName) ~= "string" then
-            error("LibSimpleDBProfiles: corrupt storage: user profile keys must be strings", 3)
+        if type(storedName) ~= "string" then
+            error("LibSimpleDBProfiles: corrupt storage: user profile keys must be strings", STORAGE_ERROR_LEVEL)
         end
 
-        local normalized = Internal.NormalizeProfileName(oldName, "storage profile")
+        local normalizedName = Internal.NormalizeProfileName(storedName, "storage profile")
 
-        if not normalized then
-            error(("LibSimpleDBProfiles: corrupt storage: invalid user profile name %q"):format(oldName), 3)
+        if not normalizedName then
+            error(
+                ("LibSimpleDBProfiles: corrupt storage: invalid user profile name %q"):format(
+                    storedName
+                ),
+                STORAGE_ERROR_LEVEL
+            )
         end
 
-        local data = assertTable(profiles[oldName], "profiles[" .. oldName .. "]")
-        Internal.ValidateValue(data)
+        local profilePayload = requireTable(profiles[storedName], "profiles[" .. storedName .. "]")
+        Internal.ValidateValue(profilePayload)
 
-        if normalized ~= oldName then
-            if profiles[normalized] ~= nil then
-                error(("LibSimpleDBProfiles: corrupt storage: normalized user profile collision for %q"):format(normalized), 3)
+        if normalizedName ~= storedName then
+            if profiles[normalizedName] ~= nil then
+                error(
+                    ("LibSimpleDBProfiles: corrupt storage: normalized user profile collision for %q"):format(
+                        normalizedName
+                    ),
+                    STORAGE_ERROR_LEVEL
+                )
             end
 
-            profiles[normalized] = data
-            profiles[oldName] = nil
+            profiles[normalizedName] = profilePayload
+            profiles[storedName] = nil
         end
     end
 end
 
-local function normalizeCharacterInfo(characterInfo)
-    for guid, info in pairs(characterInfo) do
+local function normalizeCharacterInfo(characterInfoByGUID)
+    for guid, characterInfo in pairs(characterInfoByGUID) do
         if type(guid) ~= "string" or guid == "" then
-            error("LibSimpleDBProfiles: corrupt storage: characterInfo keys must be non-empty GUID strings", 3)
+            error(
+                "LibSimpleDBProfiles: corrupt storage: characterInfo keys must be non-empty GUID strings",
+                STORAGE_ERROR_LEVEL
+            )
         end
 
-        assertTable(info, "characterInfo[" .. guid .. "]")
+        requireTable(characterInfo, "characterInfo[" .. guid .. "]")
 
-        for field, value in pairs(info) do
-            local expectedType = characterInfoFields[field]
+        for field, value in pairs(characterInfo) do
+            local expectedType = CHARACTER_INFO_FIELD_TYPES[field]
 
             if not expectedType then
-                error(("LibSimpleDBProfiles: corrupt storage: unknown characterInfo field %q"):format(tostring(field)), 3)
+                error(
+                    ("LibSimpleDBProfiles: corrupt storage: unknown characterInfo field %q"):format(
+                        tostring(field)
+                    ),
+                    STORAGE_ERROR_LEVEL
+                )
             end
 
             if value ~= nil and type(value) ~= expectedType then
-                error(("LibSimpleDBProfiles: corrupt storage: characterInfo.%s must be a %s"):format(field, expectedType), 3)
+                error(
+                    ("LibSimpleDBProfiles: corrupt storage: characterInfo.%s must be a %s"):format(
+                        field,
+                        expectedType
+                    ),
+                    STORAGE_ERROR_LEVEL
+                )
             end
         end
     end
@@ -185,29 +240,44 @@ end
 local function normalizeSelections(storage)
     for guid, selection in pairs(storage.selections) do
         if type(guid) ~= "string" or guid == "" then
-            error("LibSimpleDBProfiles: corrupt storage: selection keys must be non-empty GUID strings", 3)
+            error(
+                "LibSimpleDBProfiles: corrupt storage: selection keys must be non-empty GUID strings",
+                STORAGE_ERROR_LEVEL
+            )
         end
 
-        local normalized, errorCode = Internal.NormalizeProfileRef(selection, "stored selection")
+        local normalizedRef, errorCode = Internal.NormalizeProfileRef(selection, "stored selection")
 
-        if not normalized then
-            error(("LibSimpleDBProfiles: corrupt storage: stored selection failed with %s"):format(errorCode), 3)
+        if not normalizedRef then
+            error(
+                ("LibSimpleDBProfiles: corrupt storage: stored selection failed with %s"):format(
+                    errorCode
+                ),
+                STORAGE_ERROR_LEVEL
+            )
         end
 
-        if normalized.kind == "user" and storage.profiles[normalized.name] == nil then
+        if normalizedRef.kind == "user" and storage.profiles[normalizedRef.name] == nil then
             storage.selections[guid] = nil
         else
-            storage.selections[guid] = normalized
-            local profileID = Internal.ResolveProfileRef(normalized, guid, storage.characterInfo[guid])
+            storage.selections[guid] = normalizedRef
+            local profileID = Internal.ResolveProfileRef(
+                normalizedRef,
+                guid,
+                storage.characterInfo[guid]
+            )
 
             if profileID and profileID.kind == "permanent" then
-                Internal.EnsureProfileData(storage, profileID)
+                Internal.EnsureProfilePayload(storage, profileID)
             end
         end
     end
 end
 
-function Internal.GetProfileData(storage, profileID)
+-- Raw payload access. These tables contain consumer overrides only; callers use
+-- LibSimpleDB when they need defaults applied.
+
+function Internal.GetProfilePayload(storage, profileID)
     if profileID.kind == "user" then
         return storage.profiles[profileID.name]
     end
@@ -216,205 +286,212 @@ function Internal.GetProfileData(storage, profileID)
         return storage.global
     end
 
-    local container = storage[Internal.permanentProfiles[profileID.profile].container]
+    local container = storage[Internal.permanentProfileDefinitions[profileID.profile].container]
     return container[profileID.key]
 end
 
-function Internal.SetProfileData(storage, profileID, data)
+function Internal.SetProfilePayload(storage, profileID, profilePayload)
     if profileID.kind == "user" then
-        storage.profiles[profileID.name] = data
+        storage.profiles[profileID.name] = profilePayload
     elseif profileID.profile == "global" then
-        storage.global = data
+        storage.global = profilePayload
     else
-        storage[Internal.permanentProfiles[profileID.profile].container][profileID.key] = data
+        storage[Internal.permanentProfileDefinitions[profileID.profile].container][profileID.key] = profilePayload
     end
 
-    return data
+    return profilePayload
 end
 
-function Internal.EnsureProfileData(storage, profileID)
-    local data = Internal.GetProfileData(storage, profileID)
+function Internal.EnsureProfilePayload(storage, profileID)
+    local profilePayload = Internal.GetProfilePayload(storage, profileID)
 
-    if data then
-        return data, false
+    if profilePayload then
+        return profilePayload, false
     end
 
-    data = {}
-    Internal.SetProfileData(storage, profileID, data)
-    return data, true
+    profilePayload = {}
+    Internal.SetProfilePayload(storage, profileID, profilePayload)
+    return profilePayload, true
 end
 
-function Internal.EnsureCurrentPermanentProfiles(storage, identity)
-    for index = 1, #Internal.permanentOrder do
-        local profile = Internal.permanentOrder[index]
+function Internal.EnsureCurrentPermanentProfilePayloads(storage, identity)
+    for index = 1, #Internal.permanentProfileOrder do
+        local profileType = Internal.permanentProfileOrder[index]
         local profileID = Internal.ResolveProfileRef(
-            { kind = "permanent", profile = profile },
+            { kind = "permanent", profile = profileType },
             identity.guid,
             identity
         )
 
         if profileID then
-            Internal.EnsureProfileData(storage, profileID)
+            Internal.EnsureProfilePayload(storage, profileID)
         end
     end
 end
 
 function Internal.NormalizeStorage(storage, identity)
-    local wasFresh = next(storage) == nil
-    local metadata = storage.__lsdbProfiles
+    local isFreshStorage = next(storage) == nil
+    local storageMetadata = storage[STORAGE_METADATA_KEY]
 
-    if metadata == nil then
+    if storageMetadata == nil then
+        -- An unversioned table is accepted only when every key already belongs
+        -- to this library. This prevents accidental capture of legacy addon data.
         validateRootKeys(storage)
-        metadata = {
-            schema = Internal.currentStorageSchema,
-            payloadVersion = 1,
+        storageMetadata = {
+            schema = CURRENT_STORAGE_SCHEMA_VERSION,
+            payloadVersion = INITIAL_PAYLOAD_VERSION,
         }
-        storage.__lsdbProfiles = metadata
+        storage[STORAGE_METADATA_KEY] = storageMetadata
     else
-        metadata = assertTable(metadata, "__lsdbProfiles")
-        validateMetadata(metadata)
-        metadata = migrateStorage(storage, metadata)
+        storageMetadata = requireTable(storageMetadata, STORAGE_METADATA_KEY)
+        validateMetadata(storageMetadata)
+        storageMetadata = runStorageMigrations(storage, storageMetadata)
     end
 
-    validateMetadata(metadata)
+    validateMetadata(storageMetadata)
 
-    if metadata.payloadVersion == nil then
-        metadata.payloadVersion = 1
+    if storageMetadata.payloadVersion == nil then
+        storageMetadata.payloadVersion = INITIAL_PAYLOAD_VERSION
     end
 
     if storage.global == nil then
         storage.global = {}
     end
 
-    assertTable(storage.global, "global")
+    requireTable(storage.global, "global")
     Internal.ValidateValue(storage.global)
 
-    for index = 1, #rootContainers do
-        local name = rootContainers[index]
+    for index = 1, #TABLE_CONTAINER_KEYS do
+        local containerKey = TABLE_CONTAINER_KEYS[index]
 
-        if storage[name] == nil then
-            storage[name] = {}
+        if storage[containerKey] == nil then
+            storage[containerKey] = {}
         end
 
-        assertTable(storage[name], name)
+        requireTable(storage[containerKey], containerKey)
     end
 
-    normalizeProfileMap(storage.realms, "realms")
-    normalizeProfileMap(storage.characters, "characters")
-    normalizeProfileMap(storage.classes, "classes")
-    normalizeProfileMap(storage.specs, "specs")
-    normalizeProfileMap(storage.factions, "factions")
+    normalizePermanentProfileContainer(storage.realms, "realms")
+    normalizePermanentProfileContainer(storage.characters, "characters")
+    normalizePermanentProfileContainer(storage.classes, "classes")
+    normalizePermanentProfileContainer(storage.specs, "specs")
+    normalizePermanentProfileContainer(storage.factions, "factions")
     normalizeUserProfiles(storage.profiles)
     normalizeCharacterInfo(storage.characterInfo)
     normalizeSelections(storage)
-    Internal.EnsureCurrentPermanentProfiles(storage, identity)
+    Internal.EnsureCurrentPermanentProfilePayloads(storage, identity)
 
-    return metadata, wasFresh
+    return storageMetadata, isFreshStorage
 end
 
 function Internal.UpdateCharacterInfo(storage, identity)
-    local oldInfo = storage.characterInfo[identity.guid]
-    local oldCopy = oldInfo and Internal.CopyValue(oldInfo) or nil
-    local newInfo = Internal.IdentityToCharacterInfo(identity)
-    storage.characterInfo[identity.guid] = newInfo
-    return oldCopy, Internal.CopyValue(newInfo), not Internal.DeepEqual(oldCopy, newInfo)
+    local previousCharacterInfo = storage.characterInfo[identity.guid]
+    local currentCharacterInfo = Internal.BuildCharacterInfo(identity)
+    storage.characterInfo[identity.guid] = currentCharacterInfo
+    return not Internal.DeepEqual(previousCharacterInfo, currentCharacterInfo)
 end
 
-function Internal.KnownCharacterGUIDs(storage)
-    local seen = {}
-    local guids = {}
-    local containers = { storage.characterInfo, storage.characters, storage.selections }
+function Internal.CollectKnownCharacterGUIDs(storage)
+    local seenGUIDs = {}
+    local characterGUIDs = {}
+    local characterKeyedContainers = {
+        storage.characterInfo,
+        storage.characters,
+        storage.selections,
+    }
 
-    for index = 1, #containers do
-        for guid in pairs(containers[index]) do
-            if not seen[guid] then
-                seen[guid] = true
-                guids[#guids + 1] = guid
+    for index = 1, #characterKeyedContainers do
+        for guid in pairs(characterKeyedContainers[index]) do
+            if not seenGUIDs[guid] then
+                seenGUIDs[guid] = true
+                characterGUIDs[#characterGUIDs + 1] = guid
             end
         end
     end
 
-    table.sort(guids)
-    return guids
+    table.sort(characterGUIDs)
+    return characterGUIDs
 end
 
-function Internal.CharacterExists(storage, guid)
-    return storage.characterInfo[guid] ~= nil
-        or storage.characters[guid] ~= nil
-        or storage.selections[guid] ~= nil
+function Internal.CharacterExists(storage, characterGUID)
+    return storage.characterInfo[characterGUID] ~= nil
+        or storage.characters[characterGUID] ~= nil
+        or storage.selections[characterGUID] ~= nil
 end
 
-function Internal.EnumerateProfileIDs(storage)
-    local ids = {
+function Internal.CollectProfileIDs(storage)
+    local profileIDs = {
         { kind = "permanent", profile = "global" },
     }
 
-    for index = 1, #Internal.permanentOrder do
-        local profile = Internal.permanentOrder[index]
+    for index = 1, #Internal.permanentProfileOrder do
+        local profileType = Internal.permanentProfileOrder[index]
 
-        if profile ~= "global" then
-            local container = storage[Internal.permanentProfiles[profile].container]
-            local keys = Internal.SortedKeys(container)
+        if profileType ~= "global" then
+            local container = storage[Internal.permanentProfileDefinitions[profileType].container]
+            local profileKeys = Internal.SortedKeys(container)
 
-            for keyIndex = 1, #keys do
-                ids[#ids + 1] = {
+            for keyIndex = 1, #profileKeys do
+                profileIDs[#profileIDs + 1] = {
                     kind = "permanent",
-                    profile = profile,
-                    key = keys[keyIndex],
+                    profile = profileType,
+                    key = profileKeys[keyIndex],
                 }
             end
         end
     end
 
-    local names = Internal.SortedKeys(storage.profiles)
+    local userProfileNames = Internal.SortedKeys(storage.profiles)
 
-    for index = 1, #names do
-        ids[#ids + 1] = { kind = "user", name = names[index] }
+    for index = 1, #userProfileNames do
+        profileIDs[#profileIDs + 1] = { kind = "user", name = userProfileNames[index] }
     end
 
-    return ids
+    return profileIDs
 end
 
-function Internal.EnumeratePayloadEntries(storage)
-    local entries = {
+-- container/containerKey locators let migrations stage copied payloads and
+-- replace the originals only after every profile succeeds for that version step.
+function Internal.CollectPayloadEntries(storage)
+    local payloadEntries = {
         {
-            parent = storage,
-            key = "global",
-            data = storage.global,
+            container = storage,
+            containerKey = "global",
+            payload = storage.global,
             profileID = { kind = "permanent", profile = "global" },
         },
     }
 
-    for index = 1, #Internal.permanentOrder do
-        local profile = Internal.permanentOrder[index]
+    for index = 1, #Internal.permanentProfileOrder do
+        local profileType = Internal.permanentProfileOrder[index]
 
-        if profile ~= "global" then
-            local container = storage[Internal.permanentProfiles[profile].container]
-            local keys = Internal.SortedKeys(container)
+        if profileType ~= "global" then
+            local container = storage[Internal.permanentProfileDefinitions[profileType].container]
+            local profileKeys = Internal.SortedKeys(container)
 
-            for keyIndex = 1, #keys do
-                local key = keys[keyIndex]
-                entries[#entries + 1] = {
-                    parent = container,
-                    key = key,
-                    data = container[key],
-                    profileID = { kind = "permanent", profile = profile, key = key },
+            for keyIndex = 1, #profileKeys do
+                local profileKey = profileKeys[keyIndex]
+                payloadEntries[#payloadEntries + 1] = {
+                    container = container,
+                    containerKey = profileKey,
+                    payload = container[profileKey],
+                    profileID = { kind = "permanent", profile = profileType, key = profileKey },
                 }
             end
         end
     end
 
-    local names = Internal.SortedKeys(storage.profiles)
+    local userProfileNames = Internal.SortedKeys(storage.profiles)
 
-    for index = 1, #names do
-        local name = names[index]
-        entries[#entries + 1] = {
-            parent = storage.profiles,
-            key = name,
-            data = storage.profiles[name],
-            profileID = { kind = "user", name = name },
+    for index = 1, #userProfileNames do
+        local profileName = userProfileNames[index]
+        payloadEntries[#payloadEntries + 1] = {
+            container = storage.profiles,
+            containerKey = profileName,
+            payload = storage.profiles[profileName],
+            profileID = { kind = "user", name = profileName },
         }
     end
 
-    return entries
+    return payloadEntries
 end

@@ -13,8 +13,9 @@ SimpleDBAdmin addon consumes the public discovery and administration APIs.
 ## Load Order
 
 `embed.xml` is authoritative. The bootstrap must load first and `Library.lua`
-must load last. Every intermediate file must keep the `_buildingMinor` guard.
-The bootstrap validates LibSimpleDB before reserving the LibStub minor.
+must load last. Every intermediate file must keep the
+`_loadInProgressMinor` guard. The bootstrap validates LibSimpleDB before
+reserving the LibStub minor.
 
 Compatible upgrades update the persistent manager, admin, and Migration
 prototypes in place. Do not copy methods onto instances.
