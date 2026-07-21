@@ -2,7 +2,8 @@
 
 ## Status
 
-Planning only. No implementation or release exists yet.
+The initial multi-file implementation and Lua 5.1 test suite now exist. No
+release exists yet.
 
 `LibSimpleDB-2.0` is still under review and unreleased. Do not release this
 companion until the required core API has a reviewed `2.0.0` tag.
@@ -139,6 +140,7 @@ their normalized name as their exact storage key:
 MyAddonDB = {
     __lsdbProfiles = {
         schema = 1,
+        payloadVersion = 1,
     },
     global = {},
     realms = {
@@ -183,8 +185,14 @@ MyAddonDB = {
 
 `storage.__lsdbProfiles.schema` is the library-owned integer storage-schema
 version. Consumers must not write or migrate this metadata. It is independent
-of the companion's LibStub minor, Git version, and any addon-data schema stored
-inside individual profiles.
+of the companion's LibStub minor and Git version.
+
+`storage.__lsdbProfiles.payloadVersion` is the integer schema version shared by
+the consumer-owned payload inside every profile. The library initializes it to
+1 without requiring migration setup from a new consumer. It advances only
+through the optional consumer Migration contract. Library-schema migrations may
+move profile payload tables, but they preserve those opaque tables and do not
+interpret or independently change `payloadVersion`.
 
 A forced permanent-profile selection stores the permanent profile type rather
 than its current derived identity key:
@@ -301,6 +309,43 @@ Accepted permanent profile identifiers are `character`, `spec`, `class`,
 `realm`, `faction`, and `global`. References returned by the library are
 detached snapshots and may be passed back to profile methods.
 
+## Profile IDs
+
+`profileRef` is a relative selectable identity. A permanent reference resolves
+against the identity of the character being selected:
+
+```lua
+{ kind = "permanent", profile = "class" }
+```
+
+For the current Shaman this selects the Shaman Class profile; for an offline Mage
+passed to `admin:SetSelection()` it selects the Mage Class profile.
+
+`profileID` is one exact stored identity within one manager. Administration and
+consumer payload migrations use IDs when they must target or describe a specific
+stored profile independently of the current character:
+
+```lua
+{ kind = "permanent", profile = "class", key = "SHAMAN" }
+{ kind = "permanent", profile = "character", key = characterGUID }
+{ kind = "permanent", profile = "global" }
+{ kind = "user", name = "Raid" }
+```
+
+User-profile references and IDs have the same structure because the normalized
+name is already the exact identity. The Global permanent reference and ID also
+have the same structure because there is only one Global profile per manager.
+Their roles remain distinct in method contracts.
+
+A `profileID` is unique only within its manager's storage. Consumers receive
+detached IDs from descriptors and round-trip them to administration APIs;
+consumer migration callbacks receive the same ID shape alongside each payload.
+Consumers do not derive permanent keys from localized values, persist IDs in
+their own data, or pass exact keyed permanent IDs to selection methods. A keyed
+permanent `profileID` is rejected by `manager:SetProfile()` and
+`admin:SetSelection()` so a character cannot be assigned another identity's
+Character, Specialization, Class, Realm, or Faction profile.
+
 ## Profile Descriptors
 
 `GetProfiles()` returns descriptors for every current permanent profile and
@@ -309,9 +354,14 @@ selection APIs.
 
 ```lua
 {
-    ref = {
+    profileRef = {
         kind = "permanent",
         profile = "spec",
+    },
+    profileID = {
+        kind = "permanent",
+        profile = "spec",
+        key = "262",
     },
     displayName = "Elemental",
     permanent = true,
@@ -326,7 +376,11 @@ selection APIs.
 
 ```lua
 {
-    ref = {
+    profileRef = {
+        kind = "user",
+        name = "Raid",
+    },
+    profileID = {
         kind = "user",
         name = "Raid",
     },
@@ -343,6 +397,15 @@ selection APIs.
 
 `active` identifies the single selected profile supplying `activeDB` data.
 
+Every ordinary current-profile descriptor contains both its selectable
+`profileRef` and exact `profileID`. Every administration profile descriptor
+contains `profileID`, `displayName`, `permanent`, `active`, `hasData`,
+`selectionCount`, and operation capability flags. An administration descriptor
+contains `profileRef` only when selecting that relative reference resolves to
+the same exact identity: user profiles and current-identity permanent profiles.
+Descriptors for inactive historical permanent identities omit `profileRef`
+rather than expose a misleading selection reference.
+
 Descriptors expose capabilities so a consumer UI can disable unsupported
 commands without hard-coding profile kinds. Library methods still enforce the
 same rules when called directly.
@@ -352,8 +415,8 @@ normalized user name. `nameCollision` is true when another descriptor in the
 current result has the same display name. The library never appends a
 presentation qualifier to `displayName`. A consumer may render a colliding user
 profile as `Elemental (Custom)`, substitute different localized text or an icon,
-group it separately, or omit the qualifier. The typed `ref` remains the
-authoritative distinction regardless of presentation.
+group it separately, or omit the qualifier. The typed `profileRef` remains the
+authoritative selection distinction regardless of presentation.
 
 The default descriptor order is:
 
@@ -482,7 +545,8 @@ local manager = Profiles:New(addonName, storage, defaults, options)
 local db = manager:GetActiveDB()
 ```
 
-`options` is optional and currently accepts only `displayName`.
+`options` is optional. It accepts the runtime-only `displayName` override and an
+optional validated consumer `migration` object. A new consumer needs neither.
 
 Proposed unified profile API:
 
@@ -541,6 +605,44 @@ rebind the active database, or dispatch callbacks. Initial stable codes are:
 | `CURRENT_CHARACTER` | Requested administration operation cannot target the current character |
 
 Codes are additive once published and are never used as localized display text.
+
+## Success Contract
+
+Public operations return a non-nil primary result on success. Mutations include a
+second result only when the operation has meaningful additional state:
+
+```text
+SetProfile        -> activeDescriptor, changed
+CreateProfile     -> userRef
+CopyProfile       -> destinationDescriptor, overwritten
+ResetProfile      -> profileDescriptor
+RenameProfile     -> newDescriptor
+GetProfileUsage   -> usageDescriptor
+DeleteProfile     -> deletedDescriptor, affectedCharacters
+
+admin:SetSelection     -> characterDescriptor, changed
+admin:ResetProfile     -> profileDescriptor
+admin:CopyProfile      -> destinationDescriptor, overwritten
+admin:ForgetCharacter  -> forgottenCharacterDescriptor
+```
+
+The primary result determines how to interpret the second return. A non-nil
+primary result means success and any second value is operation-specific state. A
+nil primary result means the second value is the stable error code from the
+failure contract.
+
+Consumers that need only the primary result may assign the call to one local;
+Lua discards later returns. The first value still distinguishes success from
+failure, but ignoring the second value also intentionally discards the specific
+error code or operation state.
+
+Operations with a boolean second result return their current or destination
+descriptor and `false` for a successful no-op. Selecting the already active
+profile and copying a profile onto itself therefore remain distinguishable from
+failure without producing mutations or callbacks.
+`overwritten` reports whether the destination contained raw data before a copy;
+it is not a generic `changed` result. Returned descriptors are detached snapshots
+and may become stale after later mutations.
 
 ## Profile Operations
 
@@ -651,42 +753,64 @@ local admin = manager:GetAdmin()
 
 admin:GetCharacters()
 admin:GetProfiles()
-admin:GetProfileUsage(recordRef)
+admin:GetProfileUsage(profileID)
 admin:GetSelection(characterGUID)
 admin:SetSelection(characterGUID, profileRef)
-admin:ResetProfile(recordRef)
-admin:CopyProfile(sourceRecordRef, destinationRecordRef)
+admin:ResetProfile(profileID)
+admin:CopyProfile(sourceProfileID, destinationProfileID)
 admin:ForgetCharacter(characterGUID)
 ```
 
 The object is scoped exclusively to the manager's consumer-owned storage table.
 It requires no global registry and cannot see another manager's SavedVariables.
 
-A future standalone SimpleDBAdmin may enumerate the existing weak live-manager
-registry. Each live manager exposes its required `addonName` and resolved
+A future standalone SimpleDBAdmin may call `Profiles:GetManagers()` to enumerate
+the existing weak live-manager registry. Each live manager exposes its required
+`addonName` and resolved
 `displayName` for grouping. This discovery hook is optional infrastructure for
 that standalone addon; normal consumers continue to call only their own
 `manager:GetAdmin()`. Disabled or not-yet-loaded addons have no live manager and
 cannot be administered generically in that session.
 
-`GetCharacters()` returns detached metadata and selection descriptors for the
-union of GUIDs found in `characterInfo`, `characters`, and `selections`.
+`GetCharacters()` returns detached character descriptors for the union of GUIDs
+found in `characterInfo`, `characters`, and `selections`. Every character
+descriptor contains `guid`. Known `name`, `realmID`, `realmName`, `class`,
+`classID`, `faction`, `specID`, `level`, and `lastSeen` metadata is included;
+historically unavailable fields are nil rather than guessed. The descriptor also
+contains the stored `profileRef` when one exists and its resolved `profileID`
+when sufficient identity metadata is available.
+
 `GetProfiles()` returns detached descriptors for every stored user profile and
 every exact permanent identity instance, including inactive character, realm,
-class, specialization, and faction keys. Descriptors expose exact `recordRef`,
-`hasData`, character-selection references, and capability flags.
-`GetProfileUsage(recordRef)` returns the detached usage descriptor for one exact
-record. The ordinary manager method accepts a selection reference; the
-administration method accepts the exact record references returned by
-`admin:GetProfiles()`.
+class, specialization, and faction keys. Descriptors expose exact `profileID`,
+`hasData`, selection usage, and capability flags.
+
+`GetProfileUsage(profileID)` returns the detached usage descriptor for one exact
+profile. It reports confirmed `selectionCount` and `characters` separately from
+`unresolvedCharacters` whose stored permanent reference cannot be resolved
+without missing historical metadata. The ordinary manager method accepts a
+relative selection reference; the administration method accepts the exact
+profile IDs returned by `admin:GetProfiles()`.
+
+An exact `profileID` is never partial. Partial history means supporting character
+metadata is missing while a GUID, Character payload, or relative selection still
+exists. A permanent selection that cannot be resolved retains its `profileRef`,
+reports no resolved `profileID`, and appears in `unresolvedCharacters` for the
+applicable permanent type. It is not guessed, deleted, or reassigned while the
+character is offline. Logging into that character refreshes its metadata and
+resolves the selection.
+
+User, Global, and Character selections can resolve without Class,
+Specialization, Realm, or Faction metadata. Malformed reference shapes and
+wrong-type containers remain corruption errors rather than partial history.
 
 Administration is intentionally profile-level. It supports enumeration,
 selection, copy, reset, and explicit character cleanup, but does not expose raw
 profile tables or create inactive LibSimpleDB instances for schema-specific
 settings editing.
 
-`ResetProfile(recordRef)` clears the exact record's raw overrides but retains its
-record, character metadata, and selection. `ForgetCharacter(characterGUID)`
+`ResetProfile(profileID)` clears the exact profile's raw overrides but retains its
+profile table, character metadata, and selection. `ForgetCharacter(characterGUID)`
 explicitly removes that GUID's Character data, `characterInfo`, and stored
 selection. It does not remove shared realm, class, specialization, faction,
 Global, or user-profile data. Forgetting the current character returns
@@ -697,7 +821,7 @@ character's stored user or permanent profile selection. The current character
 continues to use normal `SetProfile()` so the active database and established
 callbacks remain authoritative.
 
-Exact offline `recordRef` values are administration handles, not ordinary
+Exact permanent `profileID` values are administration handles, not ordinary
 selection references, and are rejected by `SetProfile()`. Administration
 mutations use manager validation and existing profile lifecycle events. Offline
 selection changes and explicit character cleanup additionally emit
@@ -740,12 +864,14 @@ The companion provides stable-snapshot, error-isolated lifecycle events:
 | `OnCharacterSelectionChanged` | `character, newProfile, oldProfile` |
 | `OnCharacterForgotten` | `character` |
 
-Callback profile arguments are detached descriptors. `OnProfileChanged` fires
-whenever the active profile changes. It fires after `activeDB:SetData()` and the
-resulting LibSimpleDB `OnDataChanged`. It is the authoritative source for UI
-reacting to an active profile selection change. A UI displaying the full profile
-list also listens to the create, copy, rename, delete, and reset lifecycle events
-as needed.
+Callback profile arguments are detached descriptors. Every callback profile
+descriptor contains its exact `profileID`. It contains a
+`profileRef` only when selecting that relative reference resolves to the same
+exact profile. `OnProfileChanged` fires whenever the active profile changes. It
+fires after `activeDB:SetData()` and the resulting LibSimpleDB `OnDataChanged`.
+It is the authoritative source for UI reacting to an active profile selection
+change. A UI displaying the full profile list also listens to the create, copy,
+rename, delete, and reset lifecycle events as needed.
 
 When `SetProfile()` creates a missing user profile, dispatch order is
 `OnProfileCreated`, LibSimpleDB `OnDataChanged`, then `OnProfileChanged`.
@@ -797,6 +923,8 @@ listen to `OnProfileChanged` for the same refresh path.
 
 ## Migration
 
+### Legacy Flat Database Adoption
+
 An existing flat database cannot become its own nested permanent profile
 because that would create a SavedVariables cycle:
 
@@ -817,10 +945,13 @@ The consumer decides that its legacy flat data belongs in Global and creates the
 new outer table. `New()` supplies the remaining library-owned containers and
 schema metadata.
 
-Each consumer owns its addon-data schema version and migrations inside profile
-payloads. The companion treats those payloads as opaque and owns migrations only
-for `__lsdbProfiles`, permanent-profile containers, `profiles`, and `selections`.
-`characterInfo` is also library-owned and migrates with those containers.
+### Library Storage Schema Migrations
+
+Library migrations own only `__lsdbProfiles`, the permanent-profile containers,
+`profiles`, `selections`, and `characterInfo`. Consumer payload tables inside
+those containers remain opaque. A library migration may move or rename a
+container but must carry each payload table forward intact without interpreting
+addon-specific fields.
 
 On `New()`, the library:
 
@@ -848,6 +979,108 @@ Internal schema migration does not imply public API compatibility. A release
 that changes consumer call sites follows the library's incompatible-version
 policy, but consumers still do not manually migrate library-owned storage.
 
+### Consumer Payload Migrations
+
+An addon may independently change the schema of the raw overrides stored inside
+every profile. For example, it may move `display.scale` to
+`appearance.scale`. The addon owns that transformation; library storage
+migrations never interpret it. LibSimpleDBProfiles participates only because its
+normal and administration APIs intentionally do not expose every inactive raw
+profile table.
+
+New consumers require no data-version declaration or migration scaffolding:
+
+```lua
+local manager = Profiles:New(addonName, storage, defaults)
+```
+
+The library silently initializes `payloadVersion` to 1. A consumer creates a
+validated Migration object only in the first addon release that changes its
+payload schema:
+
+```lua
+local Migration = Profiles:CreateMigration(3)
+
+Migration:Add(1, Migrate1To2)
+Migration:Add(2, Migrate2To3)
+
+local manager = Profiles:New(addonName, storage, defaults, {
+    migration = Migration,
+})
+```
+
+`CreateMigration(3)` declares the current consumer payload version.
+`Migration:Add(1, callback)` declares the version-1-to-version-2 step. The public
+type is named `Migration`, not `MigrationPlan`, and individual steps are not
+separate objects. `Migration:Add()` returns the Migration so chaining remains
+optional.
+
+The Migration holds no manager or storage state. It may live in a separate file,
+be stored on the addon's namespace, and be passed to `New()` by the database
+initialization file. The migration file loads after the embedded libraries and
+before database initialization.
+
+Consumer migration callbacks:
+
+- Are added only when the addon changes its stored payload structure.
+- Once introduced, continue to be supplied by every later addon release.
+- Retain every supported historical step so older installations can migrate
+  through every intermediate version.
+- Mutate only the raw overrides supplied to the callback and never materialize
+  LibSimpleDB defaults when an old override is absent.
+- Treat the callback payload as the exact staged table for that invocation.
+- Do not require a manager or active LibSimpleDB instance; neither is exposed
+  until all required migrations finish.
+- Use the detached exact `profileID` argument only when migration behavior
+  genuinely depends on profile identity.
+
+Migration construction validates all of the following before execution:
+
+- The current consumer payload version is a positive integer.
+- Every source version is a positive integer below the current version.
+- Every registered migration is a function.
+- A source version may be registered only once.
+- Steps are continuous from version 1 through one less than the current version.
+- The Migration was created by the active `LibSimpleDBProfiles-1.0` family.
+
+The Migration becomes immutable when first supplied to `New()`.
+
+After the library-owned storage schema is migrated and validated, consumer
+payload migration executes as follows:
+
+1. Compare the stored `payloadVersion` with the Migration's current version.
+2. For each required version step, build staged detached copies of every stored
+   permanent and user payload.
+3. Invoke the consumer callback once per staged payload as
+   `(data, profileID)`.
+4. Validate every migrated result as SavedVariables-compatible data.
+5. Commit the complete version step only after every payload succeeds, then
+   advance `payloadVersion`.
+6. Construct the stable active LibSimpleDB instance only after every required
+   step commits.
+
+A failed step does not partially commit. Previously completed version steps and
+their version markers remain committed so the next load resumes from that
+version. A stored `payloadVersion` newer than the Migration's declared current
+version fails clearly instead of attempting a downgrade.
+
+Fresh storage supplied with a Migration initializes directly at its current
+version without running historical callbacks. Existing storage already at that
+version also skips them. Omitting `migration` preserves the stored payload
+version and performs no consumer-payload migration work.
+
+### LibSimpleDB Boundary
+
+The Migration API belongs only to LibSimpleDBProfiles. Base LibSimpleDB wraps one
+table the consumer already owns and can migrate directly before calling
+`LibSimpleDB:New()`. LibSimpleDB owns no SavedVariables container schema, should
+not reserve consumer migration metadata, and does not mirror this API.
+
+Profiles needs the hook because it alone owns enumeration of multiple
+inaccessible inactive payloads. A separate general migration utility is deferred
+unless direct-table migration logic later becomes meaningfully duplicated across
+consumers.
+
 ## Dependency And Packaging
 
 Load order in a consumer package:
@@ -862,13 +1095,25 @@ The companion fails clearly when `LibSimpleDB-2.0` or its required minor is
 unavailable. Consumer packages pin reviewed Git tags for both libraries rather
 than copying working-tree source manually.
 
-## Planned Repository Layout
+## Repository Layout
 
 ```text
 LibSimpleDBProfiles/
   .editorconfig
   .gitattributes
+  AGENTS.md
   LibSimpleDBProfiles-1.0.lua
+  Internal/
+    Util.lua
+    Identity.lua
+    Storage.lua
+    Descriptors.lua
+  Migration.lua
+  Manager.lua
+  Operations.lua
+  Admin.lua
+  Events.lua
+  Library.lua
   embed.xml
   README.md
   API.md
@@ -877,11 +1122,16 @@ LibSimpleDBProfiles/
   PLAN.md
   tests/
     run.lua
+    harness.lua
     libstub.lua
+    manager.lua
+    admin.lua
+    migration.lua
+    compatibility.lua
 ```
 
-The scaffold phase adds `.editorconfig` and `.gitattributes` with UTF-8, LF,
-final-newline, and spaces-only policy before source files are created.
+`.editorconfig` and `.gitattributes` enforce the repository's UTF-8, LF,
+final-newline, and spaces-only policy.
 
 ## Test Plan
 
@@ -911,7 +1161,11 @@ final-newline, and spaces-only policy before source files are created.
 - Per-manager administration remains scoped to its consumer storage without a
   global registry
 - Administration enumerates all stored permanent instances and user profiles
-  through exact detached record descriptors
+  through detached descriptors containing exact `profileID` values
+- Relative `profileRef` selection versus exact manager-local `profileID`
+  administration, including rejection of keyed permanent IDs by selection APIs
+- Complete exact IDs, optional historical character metadata, and separate
+  resolved versus unresolved profile usage
 - Offline selection changes, reset versus forget behavior, current-character
   forget rejection, and administration lifecycle events
 - Profile-level administration never exposes raw inactive profile databases
@@ -953,6 +1207,8 @@ final-newline, and spaces-only policy before source files are created.
   `nil, stableCode` without mutation or callbacks
 - Stable error codes for invalid names, duplicate names, missing profiles, and
   active profile restrictions
+- Primary success results for every public operation, optional operation-specific
+  second results, and consumers ignoring additional Lua returns
 - `OnDataChanged` and `OnProfileChanged` ordering and arguments
 - Lifecycle registration parity with LibSimpleDB, including idempotent duplicate
   registration, targeted removal, and all-event cleanup
@@ -968,6 +1224,13 @@ final-newline, and spaces-only policy before source files are created.
   library schema handling
 - Sequential automatic migrations preserve opaque profile payloads and commit
   schema markers only after successful steps
+- Consumer Migration construction, validation, immutability, chaining, and
+  separation from library-owned schema migrations
+- Fresh, current, older, and future consumer `payloadVersion` behavior
+- Staged consumer callbacks across every permanent and user payload, exact
+  `profileID` arguments, SavedVariables validation, and version-step atomicity
+- Consumer payload migrations finish before active LibSimpleDB construction and
+  are not mirrored by base LibSimpleDB
 - Compatible LibStub schema upgrades migrate live managers while preserving the
   manager and active LibSimpleDB objects
 - Flat-database migration without cycles or shared tables
@@ -984,6 +1247,10 @@ LibSimpleDB instance keeps ordinary reads outside the companion.
 
 ## Implementation Sequence
 
+Steps 1 through 9 are represented by the current implementation and automated
+tests. Consumer smoke testing, final review, tagging, and dependency pinning
+remain release work.
+
 1. Keep this plan, API documentation, and tests synchronized as implementation
    refines pre-release details without changing settled behavior implicitly.
 2. Scaffold repository text policy, license, metadata, LibStub declaration, and
@@ -994,7 +1261,8 @@ LibSimpleDB instance keeps ordinary reads outside the companion.
 6. Implement one-time initial selection and the stable active database.
 7. Implement unified profile selection and lifecycle dispatch.
 8. Implement user create, copy, reset, rename, and delete operations.
-9. Add specialization-change handling, migrations, and tagged-dependency tests.
+9. Add specialization-change handling, library schema migrations, consumer
+   Migration support, and tagged-dependency tests.
 10. Smoke-test two independent consumers and one migrated LibSimpleDB consumer.
 11. Review, tag `1.0.0`, then pin the companion from migrated consumers.
 
@@ -1026,18 +1294,29 @@ LibSimpleDB instance keeps ordinary reads outside the companion.
 - `SetProfile()` creates and selects a valid missing user profile; explicit
   `CreateProfile()` remains available for creation without selection.
 - Profile descriptors expose capabilities for consumer UI generation.
+- `profileRef` is the relative selectable identity; `profileID` is the exact
+  manager-local identity used by administration and consumer migrations.
+- Historical character metadata may be incomplete, but exact `profileID` values
+  are never partial and unresolved selections are never guessed or discarded.
 - Every consumer owns an independent account-wide SavedVariables container.
 - `New()` requires `addonName`; one manager defaults to the addon's TOC title,
   while multiple same-addon managers require explicit unique `displayName`
   values.
 - The library versions and automatically migrates its owned storage structure;
-  consumers migrate only their addon payload schema and never library containers.
+  library migrations move consumer payloads opaquely and never interpret them.
+- Consumer payloads silently begin at version 1. An addon supplies a validated,
+  stateless Migration object only when it later needs to migrate every active and
+  inactive payload through consumer-owned schema changes.
+- The Profiles Migration API exists because inactive payloads are private; base
+  LibSimpleDB consumers migrate their directly owned table before construction.
 - Only one live manager may own a storage table; duplicate construction is a
   usage error, while distinct child tables are independent.
 - The library derives canonical, nonlocalized permanent-profile storage keys.
 - User profile names are normalized UTF-8 keys and may use any language.
 - Programming misuse and corrupt required state throw; expected user-facing
   conflicts return `nil, stableCode` without side effects.
+- Successful operations return a non-nil primary result and only meaningful
+  operation-specific secondary state; simple consumers may ignore later returns.
 - Typed references prevent permanent/user display-name collisions from
   selecting incorrect data.
 - Display-name collisions are allowed; descriptors report them without baking a

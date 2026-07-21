@@ -1,0 +1,13 @@
+<Ui>
+    <Script file="LibSimpleDBProfiles-1.0.lua"/>
+    <Script file="Internal\Util.lua"/>
+    <Script file="Internal\Identity.lua"/>
+    <Script file="Internal\Storage.lua"/>
+    <Script file="Migration.lua"/>
+    <Script file="Internal\Descriptors.lua"/>
+    <Script file="Manager.lua"/>
+    <Script file="Operations.lua"/>
+    <Script file="Admin.lua"/>
+    <Script file="Events.lua"/>
+    <Script file="Library.lua"/>
+</Ui>
