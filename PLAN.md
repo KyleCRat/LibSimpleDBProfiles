@@ -269,18 +269,27 @@ instances without changing the ordinary profile-selection API.
 
 `New()` must run after the consumer's SavedVariables are loaded and player
 identity APIs are available. It fails clearly when required identity cannot be
-resolved. Specialization is the exception: an unavailable or zero specialization
-ID is treated as no usable Specialization profile during initial selection. The
-lookup continues with Class and persists the resulting selection. It does not
-revise that selection if specialization data becomes available later.
+resolved. Specialization is the exception because its APIs can remain
+unavailable during the consumer's `ADDON_LOADED`. The manager binds its stable
+active database to the best currently resolvable profile but does not persist a
+lower-priority initial choice while a Specialization profile could still outrank
+it. It retries at `PLAYER_LOGIN` and completes the one-time search by
+`PLAYER_ENTERING_WORLD`. If the player still has no specialization then, the
+lower-priority result is persisted as the final selection.
 
 The library does not defer `New()` through `PLAYER_LOGIN`. A transparently
 deferred constructor could not return a fully usable manager or active database
 synchronously. Consumers do not need to wrap construction in a login callback
 solely for specialization readiness.
 
-The library listens for `ACTIVE_PLAYER_SPECIALIZATION_CHANGED`:
+The library listens for `PLAYER_LOGIN`, `PLAYER_ENTERING_WORLD`, and
+`ACTIVE_PLAYER_SPECIALIZATION_CHANGED`:
 
+- A pending initial selection is finalized exactly once when specialization
+  identity resolves, or at world entry for a player with no specialization.
+- A stored relative Specialization selection remains pending instead of being
+  discarded or throwing when its exact ID is temporarily unavailable.
+- An explicit `SetProfile()` call cancels any pending initial search.
 - A forced Specialization profile follows the new active specialization and
   stays explicitly selected even when the new profile is empty.
 - A forced user or other permanent profile remains unchanged.
@@ -1144,8 +1153,13 @@ final-newline, and spaces-only policy.
 - Canonical nonlocalized realm, character, class, spec, and faction keys
 - Localized permanent-profile display names that never become storage keys
 - Failure behavior when required player identity is unavailable
-- Initial selection skips an unavailable or zero specialization ID, persists the
-  next matching profile, and does not later promote the selection
+- Initial selection remains provisional while specialization identity is late,
+  then inherits a matching Specialization profile before persistence
+- A stored Specialization selection remains pending until its exact identity is
+  available, without replacing the stable active database
+- World entry finalizes the lower fallback for a player who still has no
+  specialization, and later specialization availability does not promote it
+- An explicit selection cancels pending initial inheritance
 - Independent managers and SavedVariables containers for two consumer addons
 - Independent child-table managers for one addon retain separate selections,
   user profiles, defaults, callbacks, and administration objects
@@ -1176,7 +1190,10 @@ final-newline, and spaces-only policy.
 - Initial data detection using `next(rawProfileTable) ~= nil`, independent of
   nested empty tables and LibSimpleDB defaults
 - Global fallback when every permanent profile is empty
-- Immediate persistence of the initial selection
+- Persistence only after the initial selection is final, never for a transient
+  provisional profile
+- Readiness callback order and the absence of duplicate refresh work when later
+  readiness events do not change the active profile
 - No selection change when a more-specific profile later gains or loses data
 - Whole-database selection with no per-path merging
 - Stable active DB identity across every profile change
@@ -1281,10 +1298,12 @@ remain release work.
 - A character with no stored selection receives one initial permanent profile
   selection in Character, Specialization, Class, Realm, Faction, Global order.
 - Initial selection skips empty permanent profiles except Global, persists its
-  result immediately, and does not re-evaluate after later data changes.
-- An unavailable or zero specialization ID is skipped during initial selection;
-  construction is not deferred and the resulting lower-priority selection is
-  not revised later.
+  result once identity readiness permits, and does not re-evaluate after later
+  data changes.
+- An unavailable or zero specialization ID does not defer construction. The
+  active database uses a provisional resolvable profile while the one-time
+  initial selection waits through login and finalizes by world entry. Once
+  finalized, the selection is not revised later.
 - A permanent profile is non-empty for initial selection exactly when
   `next(rawProfileTable) ~= nil`; defaults are never consulted.
 - Initial selection chooses one complete database and never merges less-specific

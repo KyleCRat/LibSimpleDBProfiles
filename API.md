@@ -34,6 +34,22 @@ Supported options:
 One manager may omit `displayName` and use the addon's TOC Title. Multiple live
 managers for the same addon require explicit unique display names.
 
+Construction does not wait for `PLAYER_LOGIN`. If specialization identity is
+temporarily unavailable, the stable active database is synchronously bound to
+the best profile that can already be resolved. For a character without a stored
+selection, that provisional choice is not persisted when a non-empty
+Specialization profile could still outrank it. The manager retries at
+`PLAYER_LOGIN` and finalizes the one-time selection by
+`PLAYER_ENTERING_WORLD`. A player who still has no specialization at world
+entry receives the normal lower-priority fallback.
+
+An existing relative Specialization selection also remains pending rather than
+being discarded or treated as corrupt. It is rebound when specialization
+identity resolves. Calling `SetProfile()` before readiness is an explicit
+selection and cancels any pending initial search. After finalization, later
+profile data or specialization availability never promotes a non-Specialization
+selection automatically.
+
 ### `Profiles:CreateMigration(currentVersion)`
 
 Create a stateless consumer payload Migration. See Consumer Migrations below.
@@ -283,6 +299,11 @@ An active root switch fires LibSimpleDB `OnDataChanged` before
 `OnProfileChanged`. Copying into the active profile fires LibSimpleDB
 `OnDataChanged` before `OnProfileCopied`. Resetting the active profile fires
 LibSimpleDB `OnReset` before `OnProfileReset`.
+
+When startup specialization readiness changes the provisional active root,
+`OnCharacterInfoChanged` fires first, followed by LibSimpleDB `OnDataChanged`
+and then `OnProfileChanged`. A readiness event that does not change the active
+root emits no duplicate data or profile callback.
 
 Listen to `OnProfileChanged` when UI cares about profile identity. Listen to the
 active LibSimpleDB `OnDataChanged` when a feature cares only that effective data

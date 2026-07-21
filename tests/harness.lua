@@ -17,6 +17,11 @@ local profileFiles = {
 }
 Harness.profileFiles = profileFiles
 
+local simpleDBPaths = {
+    "../LibSimpleDB/LibSimpleDB-2.0.lua",
+    "../LibSimpleDB-2.0/LibSimpleDB-2.0.lua",
+}
+
 local function fail(message, level)
     error(message, (level or 1) + 1)
 end
@@ -92,6 +97,20 @@ function Harness.findProfile(profiles, kind, identity)
     end
 
     return nil
+end
+
+function Harness.loadSimpleDB()
+    for index = 1, #simpleDBPaths do
+        local path = simpleDBPaths[index]
+        local handle = io.open(path, "rb")
+
+        if handle then
+            handle:close()
+            return dofile(path)
+        end
+    end
+
+    error("cannot find the LibSimpleDB-2.0 dependency", 2)
 end
 
 local function installWoWMocks(environment)
@@ -240,7 +259,7 @@ function Harness.freshLibrary(overrides)
 
     installWoWMocks(environment)
     dofile("tests/libstub.lua")
-    dofile("../LibSimpleDB/LibSimpleDB-2.0.lua")
+    Harness.loadSimpleDB()
 
     for index = 1, #profileFiles do
         dofile(profileFiles[index])

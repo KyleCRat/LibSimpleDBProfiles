@@ -40,17 +40,120 @@ H.test("performs one-time most-specific initial selection", function()
     H.assertEqual(manager:GetActiveProfile().profileID.profile, "spec")
 end)
 
-H.test("skips unavailable specialization during initial selection", function()
+H.test("waits for specialization identity before initial selection", function()
     local environment = H.freshLibrary()
     environment.identity.specID = nil
     environment.identity.specName = nil
     local storage = {
+        specs = { ["262"] = { marker = "spec" } },
         classes = { SHAMAN = { marker = "class" } },
         global = { marker = "global" },
     }
     local manager = environment.library:New("TestAddon", storage)
+    local activeDB = manager:GetActiveDB()
+    local events = {}
+
     H.assertEqual(manager:GetActiveProfile().profileID.profile, "class")
-    H.assertNil(storage.specs["262"])
+    H.assertNil(storage.selections[environment.identity.guid])
+    H.assertEqual(storage.specs["262"].marker, "spec")
+    H.assertNil(H.findProfile(manager:GetProfiles(), "permanent", "spec"))
+    H.assertTrue(environment.frame.events.PLAYER_LOGIN)
+    H.assertTrue(environment.frame.events.PLAYER_ENTERING_WORLD)
+
+    activeDB:RegisterLifecycleCallback("OnDataChanged", function()
+        events[#events + 1] = "data"
+    end)
+
+    manager:RegisterLifecycleCallback("OnCharacterInfoChanged", function()
+        events[#events + 1] = "character"
+    end)
+
+    manager:RegisterLifecycleCallback("OnProfileChanged", function()
+        events[#events + 1] = "profile"
+    end)
+
+    environment.frame:Fire("PLAYER_LOGIN")
+    H.assertNil(storage.selections[environment.identity.guid])
+
+    environment.identity.specID = 262
+    environment.identity.specName = "Elemental"
+    environment.now = environment.now + 10
+    environment.frame:Fire("PLAYER_ENTERING_WORLD")
+    H.assertEqual(manager:GetActiveDB(), activeDB)
+    H.assertEqual(activeDB:Get("marker"), "spec")
+    H.assertEqual(storage.selections[environment.identity.guid].profile, "spec")
+    H.assertTrue(H.findProfile(manager:GetProfiles(), "permanent", "spec") ~= nil)
+    H.assertEqual(events[1], "character")
+    H.assertEqual(events[2], "data")
+    H.assertEqual(events[3], "profile")
+    H.assertEqual(#events, 3)
+    environment.frame:Fire("PLAYER_ENTERING_WORLD")
+    H.assertEqual(#events, 3)
+end)
+
+H.test("finalizes a lower initial profile when the player has no specialization", function()
+    local environment = H.freshLibrary()
+    environment.identity.specID = nil
+    environment.identity.specName = nil
+    local storage = {
+        specs = { ["262"] = { marker = "spec" } },
+        classes = { SHAMAN = { marker = "class" } },
+        global = { marker = "global" },
+    }
+    local manager = environment.library:New("TestAddon", storage)
+
+    H.assertNil(storage.selections[environment.identity.guid])
+    environment.frame:Fire("PLAYER_ENTERING_WORLD")
+    H.assertEqual(storage.selections[environment.identity.guid].profile, "class")
+
+    environment.identity.specID = 262
+    environment.identity.specName = "Elemental"
+    environment.frame:Fire("ACTIVE_PLAYER_SPECIALIZATION_CHANGED")
+    H.assertEqual(manager:GetActiveProfile().profileID.profile, "class")
+end)
+
+H.test("explicit selection cancels a pending initial search", function()
+    local environment = H.freshLibrary()
+    environment.identity.specID = nil
+    environment.identity.specName = nil
+    local storage = {
+        global = { marker = "global" },
+        specs = { ["262"] = { marker = "spec" } },
+    }
+    local manager = environment.library:New("TestAddon", storage)
+    local selected, changed = manager:SetProfile({ kind = "permanent", profile = "global" })
+
+    H.assertFalse(changed)
+    H.assertEqual(selected.profileID.profile, "global")
+    H.assertEqual(storage.selections[environment.identity.guid].profile, "global")
+    environment.identity.specID = 262
+    environment.identity.specName = "Elemental"
+    environment.frame:Fire("PLAYER_LOGIN")
+    H.assertEqual(manager:GetActiveProfile().profileID.profile, "global")
+end)
+
+H.test("keeps a stored Specialization selection pending until identity resolves", function()
+    local environment = H.freshLibrary()
+    environment.identity.specID = nil
+    environment.identity.specName = nil
+    local storage = {
+        global = { marker = "global" },
+        specs = { ["262"] = { marker = "spec" } },
+        selections = {
+            [environment.identity.guid] = { kind = "permanent", profile = "spec" },
+        },
+    }
+    local manager = environment.library:New("TestAddon", storage)
+    local activeDB = manager:GetActiveDB()
+
+    H.assertEqual(manager:GetActiveProfile().profileID.profile, "global")
+    H.assertEqual(storage.selections[environment.identity.guid].profile, "spec")
+    environment.identity.specID = 262
+    environment.identity.specName = "Elemental"
+    environment.frame:Fire("PLAYER_LOGIN")
+    H.assertEqual(manager:GetActiveDB(), activeDB)
+    H.assertEqual(activeDB:Get("marker"), "spec")
+    H.assertEqual(manager:GetActiveProfile().profileID.profile, "spec")
 end)
 
 H.test("keeps independent storage and enforces manager ownership labels", function()
@@ -301,25 +404,13 @@ H.test("ordinary usage returns affected characters through a relative reference"
     H.assertEqual(usage.characters[1].guid, altGUID)
 end)
 
-H.test("fails clearly when required identity or a selected spec is unavailable", function()
+H.test("fails clearly when required identity is unavailable", function()
     local environment = H.freshLibrary()
     environment.identity.realmID = 0
 
     H.assertError(function()
         environment.library:New("TestAddon", {})
     end, "realm ID is unavailable")
-
-    environment = H.freshLibrary()
-    environment.identity.specID = nil
-    environment.identity.specName = nil
-
-    H.assertError(function()
-        environment.library:New("TestAddon", {
-            selections = {
-                [environment.identity.guid] = { kind = "permanent", profile = "spec" },
-            },
-        })
-    end, "selected spec profile cannot resolve")
 end)
 
 H.test("lifecycle callbacks are idempotent, snapshot-based, and error-isolated", function()

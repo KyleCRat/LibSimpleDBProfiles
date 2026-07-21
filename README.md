@@ -64,7 +64,11 @@ Character > Specialization > Class > Realm > Faction > Global
 ```
 
 The choice is persisted once. Later data changes do not trigger another
-specificity search.
+specificity search. If specialization identity is not ready during addon load,
+the manager uses a synchronous provisional profile without persisting it,
+retries during login, and completes the one-time search by world entry. This
+allows a new character to inherit an existing Specialization profile without
+turning specialization into an ongoing automatic mode.
 
 ```lua
 manager:SetProfile({ kind = "permanent", profile = "spec" })

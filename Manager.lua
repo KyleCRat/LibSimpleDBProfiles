@@ -126,6 +126,12 @@ local function resolveSavedSelection(storage, identity, profileRef)
     local profileID = Internal.ResolveProfileRef(profileRef, identity.guid, identity)
 
     if not profileID then
+        if profileRef.kind == "permanent"
+            and profileRef.profile == "spec"
+            and not identity.specID then
+            return nil, nil, true
+        end
+
         error(
             ("LibSimpleDBProfiles: selected %s profile cannot resolve for the current player"):format(
                 profileRef.profile
@@ -153,11 +159,26 @@ function Internal.NewManager(addonName, storage, defaults, options)
 
     local activeProfileRef = storage.selections[identity.guid]
     local activeProfileID, activePayload
+    local pendingSelection
 
     if activeProfileRef then
-        activeProfileID, activePayload = resolveSavedSelection(storage, identity, activeProfileRef)
+        local savedSelectionPending
+        activeProfileID, activePayload, savedSelectionPending = resolveSavedSelection(
+            storage,
+            identity,
+            activeProfileRef
+        )
 
-        if not activeProfileID then
+        if savedSelectionPending then
+            pendingSelection = {
+                kind = "saved",
+                profileRef = Internal.CopyValue(activeProfileRef),
+            }
+            activeProfileRef, activeProfileID, activePayload = chooseMostSpecificInitialProfile(
+                storage,
+                identity
+            )
+        elseif not activeProfileID then
             storage.selections[identity.guid] = nil
             activeProfileRef = nil
         end
@@ -168,7 +189,12 @@ function Internal.NewManager(addonName, storage, defaults, options)
             storage,
             identity
         )
-        storage.selections[identity.guid] = Internal.CopyValue(activeProfileRef)
+
+        if identity.specID or activeProfileRef.profile == "character" then
+            storage.selections[identity.guid] = Internal.CopyValue(activeProfileRef)
+        else
+            pendingSelection = { kind = "initial" }
+        end
     end
 
     -- The manager owns selection and storage; LibSimpleDB owns reads, writes,
@@ -182,6 +208,8 @@ function Internal.NewManager(addonName, storage, defaults, options)
         _activeProfileRef = Internal.CopyValue(activeProfileRef),
         _activeProfileID = Internal.CopyValue(activeProfileID),
         _activePayload = activePayload,
+        _pendingSelection = pendingSelection,
+        _specializationIdentityPending = not identity.specID,
         _lifecycleCallbacks = {},
     }, Internal.managerMetatable)
     manager._activeDB = Internal.SimpleDB:New(activePayload, defaults)
@@ -191,10 +219,53 @@ function Internal.NewManager(addonName, storage, defaults, options)
     return manager
 end
 
+-- Construction remains synchronous when specialization APIs are not ready.
+-- Finalize the saved or initial relative selection once identity is available,
+-- or at the world-entry boundary for a player who genuinely has no spec.
+function Internal.FinalizePendingSelection(manager, allowMissingSpecialization)
+    local pendingSelection = manager._pendingSelection
+
+    if not pendingSelection then
+        return false
+    end
+
+    local profileRef, profileID, profilePayload
+
+    if pendingSelection.kind == "saved" then
+        profileRef = pendingSelection.profileRef
+        profileID = Internal.ResolveProfileRef(
+            profileRef,
+            manager._identity.guid,
+            manager._identity
+        )
+
+        if not profileID then
+            return false
+        end
+
+        profilePayload = Internal.EnsureProfilePayload(manager._storage, profileID)
+    else
+        if not manager._identity.specID and not allowMissingSpecialization then
+            return false
+        end
+
+        profileRef, profileID, profilePayload = chooseMostSpecificInitialProfile(
+            manager._storage,
+            manager._identity
+        )
+    end
+
+    Internal.ActivateProfile(manager, profileRef, profileID, profilePayload)
+    return true
+end
+
 -- Switch the payload beneath the stable LibSimpleDB object. Consumers keep the
 -- same DB reference while LibSimpleDB emits its own bulk data-change callback.
 function Internal.ActivateProfile(manager, profileRef, profileID, profilePayload)
     if Internal.ProfileIDEqual(manager._activeProfileID, profileID) then
+        manager._activeProfileRef = Internal.CopyValue(profileRef)
+        manager._pendingSelection = nil
+        manager._storage.selections[manager._identity.guid] = Internal.CopyValue(profileRef)
         return Internal.BuildProfileDescriptor(manager, manager._activeProfileID, false), false
     end
 
@@ -202,6 +273,7 @@ function Internal.ActivateProfile(manager, profileRef, profileID, profilePayload
     manager._activeProfileRef = Internal.CopyValue(profileRef)
     manager._activeProfileID = Internal.CopyValue(profileID)
     manager._activePayload = profilePayload
+    manager._pendingSelection = nil
     manager._storage.selections[manager._identity.guid] = Internal.CopyValue(profileRef)
     manager._activeDB:SetData(profilePayload)
     local currentProfile = Internal.BuildProfileDescriptor(manager, profileID, false)
@@ -331,6 +403,10 @@ end
 -- library-owned storage, then reconnect its stable DB if a schema step replaced
 -- the active payload table.
 function Internal.RefreshLiveManager(manager)
+    if manager._specializationIdentityPending == nil then
+        manager._specializationIdentityPending = not manager._identity.specID
+    end
+
     local previousProfileID = Internal.CopyValue(manager._activeProfileID)
     local previousProfile = Internal.BuildProfileDescriptor(manager, previousProfileID, false)
     local previousPayload = manager._activePayload

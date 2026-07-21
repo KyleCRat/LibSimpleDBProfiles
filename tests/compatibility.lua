@@ -8,7 +8,7 @@ H.test("fails clearly when LibSimpleDB-2.0 is missing or too old", function()
     end, "requires LibSimpleDB-2.0 minor 1")
 
     H.assertNil(LibStub("LibSimpleDBProfiles-1.0", true))
-    dofile("../LibSimpleDB/LibSimpleDB-2.0.lua")
+    H.loadSimpleDB()
     H.loadProfileLibrary(1)
     H.assertEqual(LibStub("LibSimpleDBProfiles-1.0").MINOR, 1)
 

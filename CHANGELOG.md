@@ -13,3 +13,6 @@ All notable changes to this project will be documented in this file.
   forget behavior.
 - Add stateless consumer Migration objects with staged version-step commits.
 - Add mixed-embed compatible prototype upgrades and a Lua 5.1 test suite.
+- Reconcile specialization identity after addon load so new characters can
+  inherit existing Specialization profiles and stored Specialization selections
+  survive reload without constructor failure.
