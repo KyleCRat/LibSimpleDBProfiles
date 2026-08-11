@@ -2,11 +2,10 @@
 
 ## Status
 
-The initial multi-file implementation and Lua 5.1 test suite now exist. No
-release exists yet.
-
-`LibSimpleDB-2.0` is still under review and unreleased. Do not release this
-companion until the required core API has a reviewed `2.0.0` tag.
+The initial multi-file implementation, Lua 5.1 test suite, and YvBags consumer
+integration are complete and verified on WoW 12.1.0. The `1.0.0` candidate is
+ready for final review and tagging after the required core API has a reviewed
+`2.0.0` tag.
 
 ## Goal
 
@@ -1264,9 +1263,9 @@ LibSimpleDB instance keeps ordinary reads outside the companion.
 
 ## Implementation Sequence
 
-Steps 1 through 9 are represented by the current implementation and automated
-tests. Consumer smoke testing, final review, tagging, and dependency pinning
-remain release work.
+Steps 1 through 10 are represented by the current implementation, automated
+tests, and YvBags consumer integration. Final review, tagging, and dependency
+pinning remain release work.
 
 1. Keep this plan, API documentation, and tests synchronized as implementation
    refines pre-release details without changing settled behavior implicitly.
@@ -1280,7 +1279,8 @@ remain release work.
 8. Implement user create, copy, reset, rename, and delete operations.
 9. Add specialization-change handling, library schema migrations, consumer
    Migration support, and tagged-dependency tests.
-10. Smoke-test two independent consumers and one migrated LibSimpleDB consumer.
+10. Smoke-test YvBags as the initial migrated consumer. Validate additional
+    consumers during future integrations and update the library as needed.
 11. Review, tag `1.0.0`, then pin the companion from migrated consumers.
 
 ## Resolved Contract Decisions

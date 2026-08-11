@@ -6,13 +6,13 @@ identity-backed profiles, user-created profiles, lifecycle callbacks,
 administration for offline characters, and staged consumer payload migrations.
 
 The current API family is `LibSimpleDBProfiles-1.0`. It targets WoW Interface
-`120007` and Lua 5.1.
+`120100` and Lua 5.1.
 
 ## Status
 
-The initial implementation and Lua 5.1 test suite are complete. The library is
-not released yet and remains dependent on the reviewed `LibSimpleDB-2.0`
-`2.0.0` release.
+The initial implementation, Lua 5.1 test suite, and YvBags consumer integration
+are complete and verified on WoW 12.1.0. The `1.0.0` candidate is ready for
+final review and tagging after the reviewed `LibSimpleDB` `2.0.0` tag exists.
 
 ## Embed And Create
 

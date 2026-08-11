@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 1.0.0 - 2026-08-10
 
 - Implement the initial `LibSimpleDBProfiles-1.0` family on
   `LibSimpleDB-2.0`.
