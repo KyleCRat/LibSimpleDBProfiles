@@ -10,9 +10,11 @@ The current API family is `LibSimpleDBProfiles-1.0`. It targets WoW Interface
 
 ## Status
 
-The released baseline is `1.0.0`, built on `LibSimpleDB` `2.0.0` and verified
-with YvBags on WoW 12.1.0. The configurable `initialProfile` option is currently
-unreleased; see the changelog before updating a consumer's package pin.
+Release `1.1.0` uses LibStub implementation minor `2` in the existing
+`LibSimpleDBProfiles-1.0` family and requires `LibSimpleDB` `2.0.0` or newer
+within its `LibSimpleDB-2.0` family. It adds configurable first-use selection
+through `initialProfile`; existing selections and the default most-specific
+policy are unchanged. See the changelog before updating a consumer's package pin.
 
 ## Embed And Create
 
@@ -83,8 +85,7 @@ manager:SetProfile({ kind = "user", name = "Raid" })
 
 Selecting a valid missing user profile creates and selects it atomically.
 
-See [API.md](API.md) for the complete contract and [PLAN.md](PLAN.md) for the
-design rationale and storage model.
+See [API.md](API.md) for the complete contract.
 
 ## Reading The Source
 

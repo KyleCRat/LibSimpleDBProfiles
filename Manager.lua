@@ -1,6 +1,6 @@
 -- Construct managers, own current-character selection, and keep one stable
 -- LibSimpleDB instance connected to the active profile payload.
-local BUILD_MINOR = 1
+local BUILD_MINOR = 2
 local lib = LibStub("LibSimpleDBProfiles-1.0", true)
 
 if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then

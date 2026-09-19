@@ -1,5 +1,5 @@
 -- Implement exact profileID and offline-character administration without a UI.
-local BUILD_MINOR = 1
+local BUILD_MINOR = 2
 local lib = LibStub("LibSimpleDBProfiles-1.0", true)
 
 if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then

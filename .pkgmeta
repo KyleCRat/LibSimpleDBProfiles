@@ -1,0 +1,12 @@
+package-as: LibSimpleDBProfiles-1.0
+
+manual-changelog:
+    filename: CHANGELOG.md
+    markup-type: markdown
+
+ignore:
+    - AGENTS.md
+    - FIXME.md
+    - TODO.md
+    - PLAN.md
+    - tests

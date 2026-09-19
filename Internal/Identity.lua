@@ -1,6 +1,6 @@
 -- Capture canonical character identity and translate between selectable
 -- profileRef values, exact profileID values, and localized display names.
-local BUILD_MINOR = 1
+local BUILD_MINOR = 2
 local lib = LibStub("LibSimpleDBProfiles-1.0", true)
 
 if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then

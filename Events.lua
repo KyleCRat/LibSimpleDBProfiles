@@ -1,6 +1,6 @@
 -- Refresh character identity on specialization changes and follow the new
 -- specialization only when the manager explicitly selected that profile type.
-local BUILD_MINOR = 1
+local BUILD_MINOR = 2
 local lib = LibStub("LibSimpleDBProfiles-1.0", true)
 
 if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then

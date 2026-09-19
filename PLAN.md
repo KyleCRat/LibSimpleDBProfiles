@@ -4,8 +4,9 @@
 
 The initial multi-file implementation is released as `1.0.0` on top of
 LibSimpleDB `2.0.0`, with YvBags integration verified on WoW 12.1.0.
-Configurable first-use selection through `initialProfile` is implemented but
-unreleased; the original most-specific policy remains the default.
+Release `1.1.0` adds configurable first-use selection through `initialProfile`
+with LibStub implementation minor `2`; the original most-specific policy remains
+the default and existing saved selections are preserved.
 
 ## Goal
 

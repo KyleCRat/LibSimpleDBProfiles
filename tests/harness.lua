@@ -284,18 +284,18 @@ function Harness.loadProfileLibrary(minor)
     for index = 1, #profileFiles do
         local path = profileFiles[index]
 
-        if not minor or minor == 1 then
+        if not minor then
             dofile(path)
         else
             local handle = assert(io.open(path, "rb"))
             local source = handle:read("*a")
             handle:close()
             source = source:gsub(
-                'local LIBRARY_MAJOR, LIBRARY_MINOR = "LibSimpleDBProfiles%-1%.0", 1',
+                'local LIBRARY_MAJOR, LIBRARY_MINOR = "LibSimpleDBProfiles%-1%.0", %d+',
                 ('local LIBRARY_MAJOR, LIBRARY_MINOR = "LibSimpleDBProfiles-1.0", %d'):format(minor),
                 1
             )
-            source = source:gsub("local BUILD_MINOR = 1", "local BUILD_MINOR = " .. minor)
+            source = source:gsub("local BUILD_MINOR = %d+", "local BUILD_MINOR = " .. minor)
             local chunk, message = loadstring(source, "@" .. path)
 
             if not chunk then

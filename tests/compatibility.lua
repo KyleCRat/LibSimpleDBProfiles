@@ -26,7 +26,7 @@ H.test("equal embedded copies do not rebuild the active library", function()
     local oldMethod = manager.GetActiveDB
     local oldFrame = environment.library._eventFrame
 
-    H.loadProfileLibrary(1)
+    H.loadProfileLibrary(environment.library.MINOR)
     H.assertEqual(manager.GetActiveDB, oldMethod)
     H.assertEqual(environment.library._eventFrame, oldFrame)
     H.assertEqual(manager:GetActiveDB():GetDefault("missing"), nil)
@@ -34,21 +34,22 @@ end)
 
 H.test("higher compatible minors update live instances and reject lower overwrite", function()
     local environment = H.freshLibrary()
+    local originalMinor = environment.library.MINOR
     local storage = { global = { value = 10 } }
     local manager = environment.library:New("TestAddon", storage)
     local activeDB = manager:GetActiveDB()
     local oldMethod = manager.GetActiveProfile
 
-    local upgraded = H.loadProfileLibrary(2)
+    local upgraded = H.loadProfileLibrary(originalMinor + 1)
     H.assertEqual(upgraded, environment.library)
-    H.assertEqual(upgraded.MINOR, 2)
+    H.assertEqual(upgraded.MINOR, originalMinor + 1)
     H.assertEqual(manager:GetActiveDB(), activeDB)
     H.assertEqual(manager:GetActiveDB():Get("value"), 10)
     H.assertTrue(manager.GetActiveProfile ~= oldMethod)
 
     local upgradedMethod = manager.GetActiveProfile
-    H.loadProfileLibrary(1)
-    H.assertEqual(upgraded.MINOR, 2)
+    H.loadProfileLibrary(originalMinor)
+    H.assertEqual(upgraded.MINOR, originalMinor + 1)
     H.assertEqual(manager.GetActiveProfile, upgradedMethod)
     H.assertEqual(manager:GetActiveDB(), activeDB)
 end)

@@ -1,6 +1,6 @@
 -- Reserve this LibStub implementation and prepare the persistent objects that
 -- must survive compatible minor upgrades. Library.lua completes the load.
-local LIBRARY_MAJOR, LIBRARY_MINOR = "LibSimpleDBProfiles-1.0", 1
+local LIBRARY_MAJOR, LIBRARY_MINOR = "LibSimpleDBProfiles-1.0", 2
 local REQUIRED_SIMPLE_DB_MINOR = 1
 local CALLER_ERROR_LEVEL = 2
 local WEAK_KEYS = "k"

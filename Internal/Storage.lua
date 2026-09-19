@@ -1,6 +1,6 @@
 -- Own the private SavedVariables schema and raw payload containers. This file
 -- never applies LibSimpleDB defaults to stored profile payloads.
-local BUILD_MINOR = 1
+local BUILD_MINOR = 2
 local lib = LibStub("LibSimpleDBProfiles-1.0", true)
 
 if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then

@@ -2,12 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## 1.1.0 - 2026-09-19
 
 - Add the `initialProfile` constructor option: keep `mostSpecific` as the
   compatible default, or choose any permanent profile type for characters
   without a valid saved selection. Preserve existing choices and handle
   delayed specialization identity without overwriting user selections.
+- Publish LibStub implementation minor 2 in the existing
+  `LibSimpleDBProfiles-1.0` family so newer embeds replace the 1.0.0
+  implementation while preserving live manager and active-database identities.
+- Add package metadata with a Markdown changelog and development-file exclusions.
 
 ## 1.0.0 - 2026-08-10
 
