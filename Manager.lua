@@ -21,6 +21,7 @@ local METHOD_ERROR_LEVEL = 2
 local ALLOWED_CONSTRUCTOR_OPTIONS = {
     displayName = true,
     migration = true,
+    initialProfile = true,
 }
 
 local function validateConstructorArguments(addonName, storage, defaults, options)
@@ -63,6 +64,13 @@ local function validateConstructorArguments(addonName, storage, defaults, option
     if options.displayName ~= nil
         and (type(options.displayName) ~= "string" or options.displayName == "") then
         error("LibSimpleDBProfiles: options.displayName must be a non-empty string", CONSTRUCTOR_ERROR_LEVEL)
+    end
+
+    if options.initialProfile ~= nil
+        and (type(options.initialProfile) ~= "string"
+            or (options.initialProfile ~= "mostSpecific"
+                and not Internal.permanentProfileDefinitions[options.initialProfile])) then
+        error("LibSimpleDBProfiles: initialProfile must be mostSpecific or a permanent profile name", CONSTRUCTOR_ERROR_LEVEL)
     end
 
     return options
@@ -112,6 +120,24 @@ local function chooseMostSpecificInitialProfile(storage, identity)
     error("LibSimpleDBProfiles: failed to resolve the Global fallback profile", CONSTRUCTOR_ERROR_LEVEL)
 end
 
+-- An explicit initial type may select an empty profile. Missing specialization
+-- identity uses Global provisionally, then retries at the normal login boundary.
+local function chooseInitialProfile(storage, identity, initialProfile)
+    if initialProfile == "mostSpecific" then
+        return chooseMostSpecificInitialProfile(storage, identity)
+    end
+
+    local profileRef = { kind = "permanent", profile = initialProfile }
+    local profileID = Internal.ResolveProfileRef(profileRef, identity.guid, identity)
+
+    if not profileID then
+        profileRef = { kind = "permanent", profile = "global" }
+        profileID = Internal.ResolveProfileRef(profileRef, identity.guid, identity)
+    end
+
+    return profileRef, profileID, Internal.EnsureProfilePayload(storage, profileID)
+end
+
 local function resolveSavedSelection(storage, identity, profileRef)
     if profileRef.kind == "user" then
         local profilePayload = storage.profiles[profileRef.name]
@@ -146,6 +172,7 @@ end
 
 function Internal.NewManager(addonName, storage, defaults, options)
     options = validateConstructorArguments(addonName, storage, defaults, options)
+    local initialProfile = options.initialProfile or "mostSpecific"
     local hasExplicitDisplayName = options.displayName ~= nil
     local displayName = options.displayName or Internal.ResolveAddonDisplayName(addonName)
     validateManagerOwnership(addonName, storage, displayName, hasExplicitDisplayName)
@@ -185,15 +212,20 @@ function Internal.NewManager(addonName, storage, defaults, options)
     end
 
     if not activeProfileRef then
-        activeProfileRef, activeProfileID, activePayload = chooseMostSpecificInitialProfile(
+        activeProfileRef, activeProfileID, activePayload = chooseInitialProfile(
             storage,
-            identity
+            identity,
+            initialProfile
         )
 
-        if identity.specID or activeProfileRef.profile == "character" then
-            storage.selections[identity.guid] = Internal.CopyValue(activeProfileRef)
-        else
+        local needsSpecialization = not identity.specID
+            and (initialProfile == "spec"
+                or (initialProfile == "mostSpecific" and activeProfileRef.profile ~= "character"))
+
+        if needsSpecialization then
             pendingSelection = { kind = "initial" }
+        else
+            storage.selections[identity.guid] = Internal.CopyValue(activeProfileRef)
         end
     end
 
@@ -205,6 +237,7 @@ function Internal.NewManager(addonName, storage, defaults, options)
         _hasExplicitDisplayName = hasExplicitDisplayName,
         _storage = storage,
         _identity = identity,
+        _initialProfile = initialProfile,
         _activeProfileRef = Internal.CopyValue(activeProfileRef),
         _activeProfileID = Internal.CopyValue(activeProfileID),
         _activePayload = activePayload,
@@ -249,9 +282,10 @@ function Internal.FinalizePendingSelection(manager, allowMissingSpecialization)
             return false
         end
 
-        profileRef, profileID, profilePayload = chooseMostSpecificInitialProfile(
+        profileRef, profileID, profilePayload = chooseInitialProfile(
             manager._storage,
-            manager._identity
+            manager._identity,
+            manager._initialProfile
         )
     end
 
@@ -403,6 +437,10 @@ end
 -- library-owned storage, then reconnect its stable DB if a schema step replaced
 -- the active payload table.
 function Internal.RefreshLiveManager(manager)
+    if manager._initialProfile == nil then
+        manager._initialProfile = "mostSpecific"
+    end
+
     if manager._specializationIdentityPending == nil then
         manager._specializationIdentityPending = not manager._identity.specID
     end

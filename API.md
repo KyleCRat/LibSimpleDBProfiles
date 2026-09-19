@@ -28,15 +28,27 @@ Supported options:
 {
     displayName = "Settings Profiles",
     migration = Migration,
+    initialProfile = "mostSpecific",
 }
 ```
 
 One manager may omit `displayName` and use the addon's TOC Title. Multiple live
 managers for the same addon require explicit unique display names.
 
-Construction does not wait for `PLAYER_LOGIN`. If specialization identity is
-temporarily unavailable, the stable active database is synchronously bound to
-the best profile that can already be resolved. For a character without a stored
+`initialProfile` applies only when a character has no valid saved selection.
+Omit it or use `"mostSpecific"` for the existing first-nonempty-profile search.
+Alternatively select `"global"`, `"character"`, `"spec"`, `"class"`, `"realm"`,
+or `"faction"` even when that profile is empty. Existing selections always win.
+This option does not copy data or introduce profile inheritance.
+
+An explicit `"spec"` waits for specialization identity using Global provisionally.
+If the player still has no specialization at world entry, Global is selected
+permanently; later acquiring a specialization does not override that selection.
+Other explicit types resolve immediately and do not wait for specialization.
+
+With `"mostSpecific"`, construction does not wait for `PLAYER_LOGIN`. If
+specialization identity is temporarily unavailable, the stable active database
+is synchronously bound to the best profile that can already be resolved. For a character without a stored
 selection, that provisional choice is not persisted when a non-empty
 Specialization profile could still outrank it. The manager retries at
 `PLAYER_LOGIN` and finalizes the one-time selection by

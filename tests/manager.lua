@@ -1,5 +1,120 @@
 local H = ...
 
+H.test("explicit Global ignores populated more-specific profiles", function()
+    local environment = H.freshLibrary()
+    local storage = {
+        characters = { [environment.identity.guid] = { marker = "character" } },
+        specs = { ["262"] = { marker = "spec" } },
+        global = { marker = "global" },
+    }
+    local manager = environment.library:New("TestAddon", storage, nil, {
+        initialProfile = "global",
+    })
+
+    H.assertEqual(manager:GetActiveDB():Get("marker"), "global")
+    H.assertEqual(storage.selections[environment.identity.guid].profile, "global")
+
+    environment.identity.specID = 263
+    environment.frame:Fire("ACTIVE_PLAYER_SPECIALIZATION_CHANGED")
+    H.assertEqual(manager:GetActiveProfile().profileID.profile, "global")
+end)
+
+H.test("explicit initial selection never replaces a saved choice", function()
+    local environment = H.freshLibrary()
+    local storage = {
+        selections = {
+            [environment.identity.guid] = { kind = "user", name = "Custom" },
+        },
+        profiles = { Custom = { marker = "custom" } },
+    }
+    local manager = environment.library:New("TestAddon", storage, nil, {
+        initialProfile = "global",
+    })
+
+    H.assertEqual(manager:GetActiveDB():Get("marker"), "custom")
+end)
+
+H.test("explicit permanent types can select empty profiles", function()
+    for _, profileType in ipairs({ "character", "spec", "class", "realm", "faction", "global" }) do
+        local environment = H.freshLibrary()
+        local manager = environment.library:New("TestAddon", {}, nil, {
+            initialProfile = profileType,
+        })
+
+        H.assertEqual(manager:GetActiveProfile().profileID.profile, profileType)
+    end
+end)
+
+H.test("explicit mostSpecific preserves specificity search", function()
+    local environment = H.freshLibrary()
+    local manager = environment.library:New("TestAddon", {
+        specs = { ["262"] = { marker = "spec" } },
+    }, nil, { initialProfile = "mostSpecific" })
+
+    H.assertEqual(manager:GetActiveDB():Get("marker"), "spec")
+end)
+
+H.test("Global initial selection does not wait for specialization", function()
+    local environment = H.freshLibrary()
+    environment.identity.specID = nil
+    local storage = {}
+    local manager = environment.library:New("TestAddon", storage, nil, {
+        initialProfile = "global",
+    })
+
+    H.assertEqual(storage.selections[environment.identity.guid].profile, "global")
+    environment.identity.specID = 262
+    environment.frame:Fire("PLAYER_LOGIN")
+    H.assertEqual(manager:GetActiveProfile().profileID.profile, "global")
+end)
+
+H.test("explicit Spec resolves after startup then follows spec changes", function()
+    local environment = H.freshLibrary()
+    environment.identity.specID = nil
+    local storage = { global = { marker = "global" } }
+    local manager = environment.library:New("TestAddon", storage, nil, {
+        initialProfile = "spec",
+    })
+
+    H.assertNil(storage.selections[environment.identity.guid])
+    H.assertEqual(manager:GetActiveDB():Get("marker"), "global")
+    environment.identity.specID = 262
+    environment.frame:Fire("PLAYER_LOGIN")
+    H.assertEqual(manager:GetActiveProfile().profileID.key, "262")
+    H.assertNil(manager:GetActiveDB():Get("marker"))
+    environment.identity.specID = 263
+    environment.frame:Fire("ACTIVE_PLAYER_SPECIALIZATION_CHANGED")
+    H.assertEqual(manager:GetActiveProfile().profileID.key, "263")
+end)
+
+H.test("explicit Spec falls back to Global if no spec exists at world entry", function()
+    local environment = H.freshLibrary()
+    environment.identity.specID = nil
+    local manager = environment.library:New("TestAddon", {}, nil, {
+        initialProfile = "spec",
+    })
+
+    environment.frame:Fire("PLAYER_ENTERING_WORLD")
+    H.assertEqual(manager:GetActiveProfile().profileID.profile, "global")
+    environment.identity.specID = 262
+    environment.frame:Fire("ACTIVE_PLAYER_SPECIALIZATION_CHANGED")
+    H.assertEqual(manager:GetActiveProfile().profileID.profile, "global")
+end)
+
+H.test("invalid initial profile options fail before creating storage", function()
+    local environment = H.freshLibrary()
+
+    for _, value in ipairs({ true, 123, "invalid", "", {} }) do
+        local storage = {}
+        local ok = pcall(environment.library.New, environment.library, "TestAddon", storage, nil, {
+            initialProfile = value,
+        })
+
+        H.assertEqual(ok, false)
+        H.assertNil(next(storage))
+    end
+end)
+
 H.test("reports the API family and dependency-backed constructor", function()
     local environment = H.freshLibrary()
     local major, minor = environment.library:GetVersion()

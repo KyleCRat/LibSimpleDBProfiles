@@ -10,9 +10,9 @@ The current API family is `LibSimpleDBProfiles-1.0`. It targets WoW Interface
 
 ## Status
 
-The initial implementation, Lua 5.1 test suite, and YvBags consumer integration
-are complete and verified on WoW 12.1.0. The `1.0.0` candidate is ready for
-final review and tagging after the reviewed `LibSimpleDB` `2.0.0` tag exists.
+The released baseline is `1.0.0`, built on `LibSimpleDB` `2.0.0` and verified
+with YvBags on WoW 12.1.0. The configurable `initialProfile` option is currently
+unreleased; see the changelog before updating a consumer's package pin.
 
 ## Embed And Create
 
@@ -56,8 +56,8 @@ Global. They use canonical nonlocalized identity keys and cannot be renamed or
 deleted. User profiles use normalized, case-sensitive UTF-8 names with no
 library-level length limit.
 
-When a character has no stored selection, the manager chooses the first
-non-empty profile in this order:
+By default, when a character has no stored selection, the manager chooses the
+first non-empty profile in this order:
 
 ```text
 Character > Specialization > Class > Realm > Faction > Global
@@ -69,6 +69,12 @@ the manager uses a synchronous provisional profile without persisting it,
 retries during login, and completes the one-time search by world entry. This
 allows a new character to inherit an existing Specialization profile without
 turning specialization into an ongoing automatic mode.
+
+Consumers can instead pass `initialProfile = "global"` (or another permanent
+profile type) in the constructor options. `"mostSpecific"` is the default.
+The option applies only to characters without a valid saved selection and
+never overrides a later user choice. An explicit `"spec"` waits for startup
+specialization identity; it falls back to Global if none exists at world entry.
 
 ```lua
 manager:SetProfile({ kind = "permanent", profile = "spec" })

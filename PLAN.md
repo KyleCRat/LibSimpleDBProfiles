@@ -2,10 +2,10 @@
 
 ## Status
 
-The initial multi-file implementation, Lua 5.1 test suite, and YvBags consumer
-integration are complete and verified on WoW 12.1.0. The `1.0.0` candidate is
-ready for final review and tagging after the required core API has a reviewed
-`2.0.0` tag.
+The initial multi-file implementation is released as `1.0.0` on top of
+LibSimpleDB `2.0.0`, with YvBags integration verified on WoW 12.1.0.
+Configurable first-use selection through `initialProfile` is implemented but
+unreleased; the original most-specific policy remains the default.
 
 ## Goal
 
@@ -19,9 +19,10 @@ The library presents one public profile model:
 - User profiles with normalized user-supplied names
 
 When a character has no stored selection, the library performs one initial
-specificity lookup, selects the most specific matching permanent profile, and
-persists that selection. There is no virtual profile or continuing specificity
-mode, and ordinary data changes never cause a profile switch.
+selection and persists it. The default is the most-specific nonempty permanent
+profile; consumers can request a specific initial type instead. There is no
+virtual profile or continuing specificity mode, and ordinary data changes never
+cause a profile switch.
 
 Consumers use the same profile-selection, active-database, reset, copy, and
 lifecycle APIs for permanent and user profiles. Internal canonical storage
@@ -479,8 +480,8 @@ recomputed whenever descriptors are requested.
 
 ## Initial Profile Selection
 
-With no stored character selection, construction chooses the first permanent
-profile containing raw data:
+With no stored character selection and `initialProfile = "mostSpecific"`
+(the default), construction chooses the first permanent profile containing raw data:
 
 ```text
 Character > Specialization > Class > Realm > Faction > Global
@@ -489,6 +490,13 @@ Character > Specialization > Class > Realm > Faction > Global
 Global is always the final fallback even when empty. Other empty permanent
 profiles are skipped during initial selection but remain valid explicit
 selections.
+
+Consumers can instead set `initialProfile` to a permanent type: `global`,
+`character`, `spec`, `class`, `realm`, or `faction`. That type is selected even
+when its payload is empty. Existing saved selections always take precedence.
+An explicit Global choice persists immediately without waiting for specialization
+identity; an explicit Spec choice waits at the normal login boundary and uses
+Global if no specialization becomes available by world entry.
 
 For this lookup, a profile contains raw data exactly when
 `next(rawProfileTable) ~= nil`. The library does not recursively discard empty

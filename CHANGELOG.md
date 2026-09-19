@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+- Add the `initialProfile` constructor option: keep `mostSpecific` as the
+  compatible default, or choose any permanent profile type for characters
+  without a valid saved selection. Preserve existing choices and handle
+  delayed specialization identity without overwriting user selections.
+
 ## 1.0.0 - 2026-08-10
 
 - Implement the initial `LibSimpleDBProfiles-1.0` family on
