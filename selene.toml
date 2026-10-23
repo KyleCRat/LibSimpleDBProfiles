@@ -1,0 +1,11 @@
+std = "wow"
+
+[lints]
+# WoW exposes named frames, SavedVariables, and optional integrations through _G.
+global_usage = "allow"
+multiple_statements = "deny"
+
+[config]
+multiple_statements = { one_line_if = "allow" }
+# Nested widget methods conventionally name their own receiver self.
+shadowing = { ignore_pattern = "^(self$|_)" }

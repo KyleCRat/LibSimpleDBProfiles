@@ -3,9 +3,7 @@
 local BUILD_MINOR = 2
 local lib = LibStub("LibSimpleDBProfiles-1.0", true)
 
-if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then
-    return
-end
+if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then return end
 
 local Internal = lib._internal
 
@@ -65,11 +63,10 @@ end
 local function captureSpecializationIdentity()
     local specializationIndex = C_SpecializationInfo.GetSpecialization()
 
-    if not specializationIndex then
-        return nil, nil
-    end
+    if not specializationIndex then return nil, nil end
 
-    local specID, specName = C_SpecializationInfo.GetSpecializationInfo(specializationIndex)
+    local specID, specName =
+        C_SpecializationInfo.GetSpecializationInfo(specializationIndex)
 
     if type(specID) ~= "number" or specID == INVALID_NUMERIC_ID then
         return nil, nil
@@ -90,9 +87,11 @@ function Internal.CaptureCurrentIdentity()
         )
     end
 
-    if realmIDValue == INVALID_NUMERIC_ID
+    if
+        realmIDValue == INVALID_NUMERIC_ID
         or realmIDValue == ""
-        or realmIDValue == INVALID_ID_TEXT then
+        or realmIDValue == INVALID_ID_TEXT
+    then
         error(
             "LibSimpleDBProfiles: player realm ID is unavailable; construct after player identity is ready",
             CAPTURE_ERROR_LEVEL
@@ -120,9 +119,7 @@ function Internal.CaptureCurrentIdentity()
 
     local className = UnitClass(PLAYER_UNIT)
 
-    if type(className) ~= "string" or className == "" then
-        className = class
-    end
+    if type(className) ~= "string" or className == "" then className = class end
 
     local faction, factionName = UnitFactionGroup(PLAYER_UNIT)
     faction = requireIdentityString(faction, "faction")
@@ -134,9 +131,7 @@ function Internal.CaptureCurrentIdentity()
     local specID, specName = captureSpecializationIdentity()
     local level = UnitLevel(PLAYER_UNIT)
 
-    if type(level) ~= "number" then
-        level = nil
-    end
+    if type(level) ~= "number" then level = nil end
 
     return {
         guid = guid,
@@ -188,22 +183,36 @@ end
 
 function Internal.NormalizeProfileRef(profileRef, operation)
     if type(profileRef) ~= "table" then
-        error(("Usage: %s(profileRef) requires a typed profile reference"):format(operation), REFERENCE_ERROR_LEVEL)
+        error(
+            ("Usage: %s(profileRef) requires a typed profile reference"):format(
+                operation
+            ),
+            REFERENCE_ERROR_LEVEL
+        )
     end
 
     if profileRef.kind == "user" then
-        validateRecordFields(profileRef, { kind = true, name = true }, operation, "profile reference")
-        local normalizedName, errorCode = Internal.NormalizeProfileName(profileRef.name, operation)
+        validateRecordFields(
+            profileRef,
+            { kind = true, name = true },
+            operation,
+            "profile reference"
+        )
+        local normalizedName, errorCode =
+            Internal.NormalizeProfileName(profileRef.name, operation)
 
-        if not normalizedName then
-            return nil, errorCode
-        end
+        if not normalizedName then return nil, errorCode end
 
         return { kind = "user", name = normalizedName }
     end
 
     if profileRef.kind == "permanent" then
-        validateRecordFields(profileRef, { kind = true, profile = true }, operation, "profile reference")
+        validateRecordFields(
+            profileRef,
+            { kind = true, profile = true },
+            operation,
+            "profile reference"
+        )
 
         if not Internal.permanentProfileDefinitions[profileRef.profile] then
             error(
@@ -229,16 +238,25 @@ end
 
 function Internal.NormalizeProfileID(profileID, operation)
     if type(profileID) ~= "table" then
-        error(("Usage: %s(profileID) requires a typed profile ID"):format(operation), REFERENCE_ERROR_LEVEL)
+        error(
+            ("Usage: %s(profileID) requires a typed profile ID"):format(
+                operation
+            ),
+            REFERENCE_ERROR_LEVEL
+        )
     end
 
     if profileID.kind == "user" then
-        validateRecordFields(profileID, { kind = true, name = true }, operation, "profile ID")
-        local normalizedName, errorCode = Internal.NormalizeProfileName(profileID.name, operation)
+        validateRecordFields(
+            profileID,
+            { kind = true, name = true },
+            operation,
+            "profile ID"
+        )
+        local normalizedName, errorCode =
+            Internal.NormalizeProfileName(profileID.name, operation)
 
-        if not normalizedName then
-            return nil, errorCode
-        end
+        if not normalizedName then return nil, errorCode end
 
         return { kind = "user", name = normalizedName }
     end
@@ -253,8 +271,13 @@ function Internal.NormalizeProfileID(profileID, operation)
         )
     end
 
-    validateRecordFields(profileID, { kind = true, profile = true, key = true }, operation, "profile ID")
-    local permanentProfileDefinition = Internal.permanentProfileDefinitions[profileID.profile]
+    validateRecordFields(profileID, {
+        kind = true,
+        profile = true,
+        key = true,
+    }, operation, "profile ID")
+    local permanentProfileDefinition =
+        Internal.permanentProfileDefinitions[profileID.profile]
 
     if not permanentProfileDefinition then
         error(
@@ -288,7 +311,11 @@ function Internal.NormalizeProfileID(profileID, operation)
         )
     end
 
-    return { kind = "permanent", profile = profileID.profile, key = profileID.key }
+    return {
+        kind = "permanent",
+        profile = profileID.profile,
+        key = profileID.key,
+    }
 end
 
 function Internal.ResolveProfileRef(profileRef, guid, characterInfo)
@@ -303,21 +330,27 @@ function Internal.ResolveProfileRef(profileRef, guid, characterInfo)
     end
 
     if profileType == "character" then
-        if type(guid) ~= "string" or guid == "" then
-            return nil
-        end
+        if type(guid) ~= "string" or guid == "" then return nil end
 
-        return { kind = "permanent", profile = "character", key = guid }
+        return {
+            kind = "permanent",
+            profile = "character",
+            key = guid,
+        }
     end
 
-    local permanentProfileDefinition = Internal.permanentProfileDefinitions[profileType]
-    local key = characterInfo and characterInfo[permanentProfileDefinition.characterField]
+    local permanentProfileDefinition =
+        Internal.permanentProfileDefinitions[profileType]
+    local key = characterInfo
+        and characterInfo[permanentProfileDefinition.characterField]
 
-    if type(key) ~= "string" or key == "" then
-        return nil
-    end
+    if type(key) ~= "string" or key == "" then return nil end
 
-    return { kind = "permanent", profile = profileType, key = key }
+    return {
+        kind = "permanent",
+        profile = profileType,
+        key = key,
+    }
 end
 
 function Internal.ResolveCurrentProfileID(manager, profileType)
@@ -334,9 +367,13 @@ function Internal.SelectableProfileRefForID(manager, profileID)
     end
 
     local profileRef = { kind = "permanent", profile = profileID.profile }
-    local currentProfileID = Internal.ResolveCurrentProfileID(manager, profileID.profile)
+    local currentProfileID =
+        Internal.ResolveCurrentProfileID(manager, profileID.profile)
 
-    if currentProfileID and Internal.ProfileIDEqual(currentProfileID, profileID) then
+    if
+        currentProfileID
+        and Internal.ProfileIDEqual(currentProfileID, profileID)
+    then
         return profileRef
     end
 
@@ -347,9 +384,7 @@ end
 
 local function findCharacterInfoByField(storage, field, value)
     for _, characterInfo in pairs(storage.characterInfo) do
-        if characterInfo[field] == value then
-            return characterInfo
-        end
+        if characterInfo[field] == value then return characterInfo end
     end
 
     return nil
@@ -360,14 +395,17 @@ local function getClassDisplayName(manager, classKey)
         return manager._identity.className
     end
 
-    local characterInfo = findCharacterInfoByField(manager._storage, "class", classKey)
+    local characterInfo =
+        findCharacterInfoByField(manager._storage, "class", classKey)
 
-    if characterInfo and type(GetClassInfo) == "function" and characterInfo.classID then
+    if
+        characterInfo
+        and type(GetClassInfo) == "function"
+        and characterInfo.classID
+    then
         local name = GetClassInfo(characterInfo.classID)
 
-        if type(name) == "string" and name ~= "" then
-            return name
-        end
+        if type(name) == "string" and name ~= "" then return name end
     end
 
     local localized = _G.LOCALIZED_CLASS_NAMES_MALE
@@ -381,8 +419,11 @@ local function getSpecDisplayName(manager, specKey)
 
     local numericSpecID = tonumber(specKey)
 
-    if numericSpecID and C_SpecializationInfo.GetSpecializationNameForSpecID then
-        local specName = C_SpecializationInfo.GetSpecializationNameForSpecID(numericSpecID)
+    if
+        numericSpecID and C_SpecializationInfo.GetSpecializationNameForSpecID
+    then
+        local specName =
+            C_SpecializationInfo.GetSpecializationNameForSpecID(numericSpecID)
 
         if type(specName) == "string" and specName ~= "" then
             return specName
@@ -393,15 +434,11 @@ local function getSpecDisplayName(manager, specKey)
 end
 
 function Internal.ResolveProfileDisplayName(manager, profileID)
-    if profileID.kind == "user" then
-        return profileID.name
-    end
+    if profileID.kind == "user" then return profileID.name end
 
     local profileType = profileID.profile
 
-    if profileType == "global" then
-        return _G.GLOBAL or "Global"
-    end
+    if profileType == "global" then return _G.GLOBAL or "Global" end
 
     if profileType == "character" then
         local characterInfo = manager._storage.characterInfo[profileID.key]
@@ -413,7 +450,8 @@ function Internal.ResolveProfileDisplayName(manager, profileID)
             return manager._identity.realmName
         end
 
-        local characterInfo = findCharacterInfoByField(manager._storage, "realmID", profileID.key)
+        local characterInfo =
+            findCharacterInfoByField(manager._storage, "realmID", profileID.key)
         return characterInfo and characterInfo.realmName or profileID.key
     end
 
@@ -445,13 +483,9 @@ function Internal.ResolveProfileDisplayName(manager, profileID)
 end
 
 function Internal.FormatProfileID(profileID)
-    if profileID.kind == "user" then
-        return "user:" .. profileID.name
-    end
+    if profileID.kind == "user" then return "user:" .. profileID.name end
 
-    if profileID.key then
-        return profileID.profile .. ":" .. profileID.key
-    end
+    if profileID.key then return profileID.profile .. ":" .. profileID.key end
 
     return profileID.profile
 end
@@ -460,7 +494,8 @@ function Internal.ResolveAddonDisplayName(addonName)
     local addonTitle
 
     if C_AddOns and type(C_AddOns.GetAddOnMetadata) == "function" then
-        addonTitle = C_AddOns.GetAddOnMetadata(addonName, ADDON_TITLE_METADATA_FIELD)
+        addonTitle =
+            C_AddOns.GetAddOnMetadata(addonName, ADDON_TITLE_METADATA_FIELD)
     end
 
     if type(addonTitle) ~= "string" or addonTitle == "" then

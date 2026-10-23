@@ -3,9 +3,7 @@
 local BUILD_MINOR = 2
 local lib = LibStub("LibSimpleDBProfiles-1.0", true)
 
-if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then
-    return
-end
+if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then return end
 
 local Internal = lib._internal
 local Manager = Internal.managerPrototype
@@ -24,7 +22,12 @@ local ALLOWED_CONSTRUCTOR_OPTIONS = {
     initialProfile = true,
 }
 
-local function validateConstructorArguments(addonName, storage, defaults, options)
+local function validateConstructorArguments(
+    addonName,
+    storage,
+    defaults,
+    options
+)
     if type(addonName) ~= "string" or addonName == "" then
         error(
             "Usage: LibSimpleDBProfiles:New(addonName, storage, defaults, options) requires a non-empty addonName",
@@ -57,33 +60,63 @@ local function validateConstructorArguments(addonName, storage, defaults, option
 
     for key in pairs(options) do
         if not ALLOWED_CONSTRUCTOR_OPTIONS[key] then
-            error(("LibSimpleDBProfiles: unknown constructor option %q"):format(tostring(key)), CONSTRUCTOR_ERROR_LEVEL)
+            error(
+                ("LibSimpleDBProfiles: unknown constructor option %q"):format(
+                    tostring(key)
+                ),
+                CONSTRUCTOR_ERROR_LEVEL
+            )
         end
     end
 
-    if options.displayName ~= nil
-        and (type(options.displayName) ~= "string" or options.displayName == "") then
-        error("LibSimpleDBProfiles: options.displayName must be a non-empty string", CONSTRUCTOR_ERROR_LEVEL)
+    if
+        options.displayName ~= nil
+        and (type(options.displayName) ~= "string" or options.displayName == "")
+    then
+        error(
+            "LibSimpleDBProfiles: options.displayName must be a non-empty string",
+            CONSTRUCTOR_ERROR_LEVEL
+        )
     end
 
-    if options.initialProfile ~= nil
-        and (type(options.initialProfile) ~= "string"
-            or (options.initialProfile ~= "mostSpecific"
-                and not Internal.permanentProfileDefinitions[options.initialProfile])) then
-        error("LibSimpleDBProfiles: initialProfile must be mostSpecific or a permanent profile name", CONSTRUCTOR_ERROR_LEVEL)
+    if
+        options.initialProfile ~= nil
+        and (
+            type(options.initialProfile) ~= "string"
+            or (
+                options.initialProfile ~= "mostSpecific"
+                and not Internal.permanentProfileDefinitions[options.initialProfile]
+            )
+        )
+    then
+        error(
+            "LibSimpleDBProfiles: initialProfile must be mostSpecific or a permanent profile name",
+            CONSTRUCTOR_ERROR_LEVEL
+        )
     end
 
     return options
 end
 
-local function validateManagerOwnership(addonName, storage, displayName, hasExplicitDisplayName)
+local function validateManagerOwnership(
+    addonName,
+    storage,
+    displayName,
+    hasExplicitDisplayName
+)
     if Internal.managerByStorage[storage] then
-        error("LibSimpleDBProfiles: this storage table already has a live manager", CONSTRUCTOR_ERROR_LEVEL)
+        error(
+            "LibSimpleDBProfiles: this storage table already has a live manager",
+            CONSTRUCTOR_ERROR_LEVEL
+        )
     end
 
     for manager in pairs(Internal.liveManagerSet) do
         if manager._addonName == addonName then
-            if not hasExplicitDisplayName or not manager._hasExplicitDisplayName then
+            if
+                not hasExplicitDisplayName
+                or not manager._hasExplicitDisplayName
+            then
                 error(
                     "LibSimpleDBProfiles: multiple managers for one addon require explicit unique displayName values",
                     CONSTRUCTOR_ERROR_LEVEL
@@ -92,7 +125,9 @@ local function validateManagerOwnership(addonName, storage, displayName, hasExpl
 
             if manager._displayName == displayName then
                 error(
-                    ("LibSimpleDBProfiles: duplicate same-addon manager displayName %q"):format(displayName),
+                    ("LibSimpleDBProfiles: duplicate same-addon manager displayName %q"):format(
+                        displayName
+                    ),
                     CONSTRUCTOR_ERROR_LEVEL
                 )
             end
@@ -106,10 +141,12 @@ local function chooseMostSpecificInitialProfile(storage, identity)
     for index = 1, #Internal.permanentProfileOrder do
         local profileType = Internal.permanentProfileOrder[index]
         local profileRef = { kind = "permanent", profile = profileType }
-        local profileID = Internal.ResolveProfileRef(profileRef, identity.guid, identity)
+        local profileID =
+            Internal.ResolveProfileRef(profileRef, identity.guid, identity)
 
         if profileID then
-            local profilePayload = Internal.GetProfilePayload(storage, profileID)
+            local profilePayload =
+                Internal.GetProfilePayload(storage, profileID)
 
             if profileType == "global" or next(profilePayload) ~= nil then
                 return profileRef, profileID, profilePayload
@@ -117,7 +154,10 @@ local function chooseMostSpecificInitialProfile(storage, identity)
         end
     end
 
-    error("LibSimpleDBProfiles: failed to resolve the Global fallback profile", CONSTRUCTOR_ERROR_LEVEL)
+    error(
+        "LibSimpleDBProfiles: failed to resolve the Global fallback profile",
+        CONSTRUCTOR_ERROR_LEVEL
+    )
 end
 
 -- An explicit initial type may select an empty profile. Missing specialization
@@ -128,33 +168,38 @@ local function chooseInitialProfile(storage, identity, initialProfile)
     end
 
     local profileRef = { kind = "permanent", profile = initialProfile }
-    local profileID = Internal.ResolveProfileRef(profileRef, identity.guid, identity)
+    local profileID =
+        Internal.ResolveProfileRef(profileRef, identity.guid, identity)
 
     if not profileID then
         profileRef = { kind = "permanent", profile = "global" }
-        profileID = Internal.ResolveProfileRef(profileRef, identity.guid, identity)
+        profileID =
+            Internal.ResolveProfileRef(profileRef, identity.guid, identity)
     end
 
-    return profileRef, profileID, Internal.EnsureProfilePayload(storage, profileID)
+    return profileRef,
+        profileID,
+        Internal.EnsureProfilePayload(storage, profileID)
 end
 
 local function resolveSavedSelection(storage, identity, profileRef)
     if profileRef.kind == "user" then
         local profilePayload = storage.profiles[profileRef.name]
 
-        if not profilePayload then
-            return nil
-        end
+        if not profilePayload then return nil end
 
         return { kind = "user", name = profileRef.name }, profilePayload
     end
 
-    local profileID = Internal.ResolveProfileRef(profileRef, identity.guid, identity)
+    local profileID =
+        Internal.ResolveProfileRef(profileRef, identity.guid, identity)
 
     if not profileID then
-        if profileRef.kind == "permanent"
+        if
+            profileRef.kind == "permanent"
             and profileRef.profile == "spec"
-            and not identity.specID then
+            and not identity.specID
+        then
             return nil, nil, true
         end
 
@@ -171,17 +216,30 @@ local function resolveSavedSelection(storage, identity, profileRef)
 end
 
 function Internal.NewManager(addonName, storage, defaults, options)
-    options = validateConstructorArguments(addonName, storage, defaults, options)
+    options =
+        validateConstructorArguments(addonName, storage, defaults, options)
     local initialProfile = options.initialProfile or "mostSpecific"
     local hasExplicitDisplayName = options.displayName ~= nil
-    local displayName = options.displayName or Internal.ResolveAddonDisplayName(addonName)
-    validateManagerOwnership(addonName, storage, displayName, hasExplicitDisplayName)
+    local displayName = options.displayName
+        or Internal.ResolveAddonDisplayName(addonName)
+    validateManagerOwnership(
+        addonName,
+        storage,
+        displayName,
+        hasExplicitDisplayName
+    )
 
     -- Establish canonical identity and make the entire storage tree valid before
     -- selecting a payload or constructing LibSimpleDB.
     local identity = Internal.CaptureCurrentIdentity()
-    local storageMetadata, isFreshStorage = Internal.NormalizeStorage(storage, identity)
-    Internal.RunConsumerMigrations(storage, storageMetadata, options.migration, isFreshStorage)
+    local storageMetadata, isFreshStorage =
+        Internal.NormalizeStorage(storage, identity)
+    Internal.RunConsumerMigrations(
+        storage,
+        storageMetadata,
+        options.migration,
+        isFreshStorage
+    )
     Internal.UpdateCharacterInfo(storage, identity)
 
     local activeProfileRef = storage.selections[identity.guid]
@@ -190,21 +248,16 @@ function Internal.NewManager(addonName, storage, defaults, options)
 
     if activeProfileRef then
         local savedSelectionPending
-        activeProfileID, activePayload, savedSelectionPending = resolveSavedSelection(
-            storage,
-            identity,
-            activeProfileRef
-        )
+        activeProfileID, activePayload, savedSelectionPending =
+            resolveSavedSelection(storage, identity, activeProfileRef)
 
         if savedSelectionPending then
             pendingSelection = {
                 kind = "saved",
                 profileRef = Internal.CopyValue(activeProfileRef),
             }
-            activeProfileRef, activeProfileID, activePayload = chooseMostSpecificInitialProfile(
-                storage,
-                identity
-            )
+            activeProfileRef, activeProfileID, activePayload =
+                chooseMostSpecificInitialProfile(storage, identity)
         elseif not activeProfileID then
             storage.selections[identity.guid] = nil
             activeProfileRef = nil
@@ -212,20 +265,23 @@ function Internal.NewManager(addonName, storage, defaults, options)
     end
 
     if not activeProfileRef then
-        activeProfileRef, activeProfileID, activePayload = chooseInitialProfile(
-            storage,
-            identity,
-            initialProfile
-        )
+        activeProfileRef, activeProfileID, activePayload =
+            chooseInitialProfile(storage, identity, initialProfile)
 
         local needsSpecialization = not identity.specID
-            and (initialProfile == "spec"
-                or (initialProfile == "mostSpecific" and activeProfileRef.profile ~= "character"))
+            and (
+                initialProfile == "spec"
+                or (
+                    initialProfile == "mostSpecific"
+                    and activeProfileRef.profile ~= "character"
+                )
+            )
 
         if needsSpecialization then
             pendingSelection = { kind = "initial" }
         else
-            storage.selections[identity.guid] = Internal.CopyValue(activeProfileRef)
+            storage.selections[identity.guid] =
+                Internal.CopyValue(activeProfileRef)
         end
     end
 
@@ -258,9 +314,7 @@ end
 function Internal.FinalizePendingSelection(manager, allowMissingSpecialization)
     local pendingSelection = manager._pendingSelection
 
-    if not pendingSelection then
-        return false
-    end
+    if not pendingSelection then return false end
 
     local profileRef, profileID, profilePayload
 
@@ -272,11 +326,10 @@ function Internal.FinalizePendingSelection(manager, allowMissingSpecialization)
             manager._identity
         )
 
-        if not profileID then
-            return false
-        end
+        if not profileID then return false end
 
-        profilePayload = Internal.EnsureProfilePayload(manager._storage, profileID)
+        profilePayload =
+            Internal.EnsureProfilePayload(manager._storage, profileID)
     else
         if not manager._identity.specID and not allowMissingSpecialization then
             return false
@@ -295,23 +348,45 @@ end
 
 -- Switch the payload beneath the stable LibSimpleDB object. Consumers keep the
 -- same DB reference while LibSimpleDB emits its own bulk data-change callback.
-function Internal.ActivateProfile(manager, profileRef, profileID, profilePayload)
+function Internal.ActivateProfile(
+    manager,
+    profileRef,
+    profileID,
+    profilePayload
+)
     if Internal.ProfileIDEqual(manager._activeProfileID, profileID) then
         manager._activeProfileRef = Internal.CopyValue(profileRef)
         manager._pendingSelection = nil
-        manager._storage.selections[manager._identity.guid] = Internal.CopyValue(profileRef)
-        return Internal.BuildProfileDescriptor(manager, manager._activeProfileID, false), false
+        manager._storage.selections[manager._identity.guid] =
+            Internal.CopyValue(profileRef)
+        return Internal.BuildProfileDescriptor(
+            manager,
+            manager._activeProfileID,
+            false
+        ),
+            false
     end
 
-    local previousProfile = Internal.BuildProfileDescriptor(manager, manager._activeProfileID, false)
+    local previousProfile = Internal.BuildProfileDescriptor(
+        manager,
+        manager._activeProfileID,
+        false
+    )
     manager._activeProfileRef = Internal.CopyValue(profileRef)
     manager._activeProfileID = Internal.CopyValue(profileID)
     manager._activePayload = profilePayload
     manager._pendingSelection = nil
-    manager._storage.selections[manager._identity.guid] = Internal.CopyValue(profileRef)
+    manager._storage.selections[manager._identity.guid] =
+        Internal.CopyValue(profileRef)
     manager._activeDB:SetData(profilePayload)
-    local currentProfile = Internal.BuildProfileDescriptor(manager, profileID, false)
-    Internal.DispatchLifecycle(manager, "OnProfileChanged", currentProfile, previousProfile)
+    local currentProfile =
+        Internal.BuildProfileDescriptor(manager, profileID, false)
+    Internal.DispatchLifecycle(
+        manager,
+        "OnProfileChanged",
+        currentProfile,
+        previousProfile
+    )
     return currentProfile, true
 end
 
@@ -338,24 +413,26 @@ function Manager:GetActiveProfile()
 end
 
 function Manager:SetProfile(profileRef)
-    local normalizedRef, errorCode = Internal.NormalizeProfileRef(profileRef, "manager:SetProfile")
+    local normalizedRef, errorCode =
+        Internal.NormalizeProfileRef(profileRef, "manager:SetProfile")
 
-    if not normalizedRef then
-        return nil, errorCode
-    end
+    if not normalizedRef then return nil, errorCode end
 
-    local profileID = Internal.ResolveProfileRef(normalizedRef, self._identity.guid, self._identity)
+    local profileID = Internal.ResolveProfileRef(
+        normalizedRef,
+        self._identity.guid,
+        self._identity
+    )
 
-    if not profileID then
-        return nil, "PROFILE_NOT_FOUND"
-    end
+    if not profileID then return nil, "PROFILE_NOT_FOUND" end
 
     local profilePayload = Internal.GetProfilePayload(self._storage, profileID)
     local profileWasCreated = false
 
     if not profilePayload then
         if normalizedRef.kind ~= "user" then
-            profilePayload = Internal.EnsureProfilePayload(self._storage, profileID)
+            profilePayload =
+                Internal.EnsureProfilePayload(self._storage, profileID)
         else
             profilePayload = {}
             Internal.SetProfilePayload(self._storage, profileID, profilePayload)
@@ -364,22 +441,37 @@ function Manager:SetProfile(profileRef)
     end
 
     if profileWasCreated then
-        Internal.DispatchLifecycle(self, "OnProfileCreated", Internal.BuildProfileDescriptor(self, profileID, false))
+        Internal.DispatchLifecycle(
+            self,
+            "OnProfileCreated",
+            Internal.BuildProfileDescriptor(self, profileID, false)
+        )
     end
 
-    return Internal.ActivateProfile(self, normalizedRef, profileID, profilePayload)
+    return Internal.ActivateProfile(
+        self,
+        normalizedRef,
+        profileID,
+        profilePayload
+    )
 end
 
 function Manager:GetProfileUsage(profileRef)
-    local normalizedRef, errorCode = Internal.NormalizeProfileRef(profileRef, "manager:GetProfileUsage")
+    local normalizedRef, errorCode =
+        Internal.NormalizeProfileRef(profileRef, "manager:GetProfileUsage")
 
-    if not normalizedRef then
-        return nil, errorCode
-    end
+    if not normalizedRef then return nil, errorCode end
 
-    local profileID = Internal.ResolveProfileRef(normalizedRef, self._identity.guid, self._identity)
+    local profileID = Internal.ResolveProfileRef(
+        normalizedRef,
+        self._identity.guid,
+        self._identity
+    )
 
-    if not profileID or not Internal.GetProfilePayload(self._storage, profileID) then
+    if
+        not profileID
+        or not Internal.GetProfilePayload(self._storage, profileID)
+    then
         return nil, "PROFILE_NOT_FOUND"
     end
 
@@ -410,9 +502,7 @@ end
 function Manager:UnregisterLifecycleCallback(event, callback)
     local callbacks = self._lifecycleCallbacks[event]
 
-    if not callbacks or not callbacks[callback] then
-        return false
-    end
+    if not callbacks or not callbacks[callback] then return false end
 
     callbacks[callback] = nil
     return true
@@ -425,7 +515,10 @@ function Manager:UnregisterAllLifecycleCallbacks(callback)
     end
 
     if type(callback) ~= "function" then
-        error("Usage: manager:UnregisterAllLifecycleCallbacks([callback])", METHOD_ERROR_LEVEL)
+        error(
+            "Usage: manager:UnregisterAllLifecycleCallbacks([callback])",
+            METHOD_ERROR_LEVEL
+        )
     end
 
     for _, callbacks in pairs(self._lifecycleCallbacks) do
@@ -446,7 +539,8 @@ function Internal.RefreshLiveManager(manager)
     end
 
     local previousProfileID = Internal.CopyValue(manager._activeProfileID)
-    local previousProfile = Internal.BuildProfileDescriptor(manager, previousProfileID, false)
+    local previousProfile =
+        Internal.BuildProfileDescriptor(manager, previousProfileID, false)
     local previousPayload = manager._activePayload
     Internal.NormalizeStorage(manager._storage, manager._identity)
 
@@ -459,7 +553,10 @@ function Internal.RefreshLiveManager(manager)
         and Internal.GetProfilePayload(manager._storage, currentProfileID)
 
     if not currentProfileID or not currentPayload then
-        error("LibSimpleDBProfiles: compatible upgrade could not preserve the active profile", METHOD_ERROR_LEVEL)
+        error(
+            "LibSimpleDBProfiles: compatible upgrade could not preserve the active profile",
+            METHOD_ERROR_LEVEL
+        )
     end
 
     manager._activeProfileID = Internal.CopyValue(currentProfileID)

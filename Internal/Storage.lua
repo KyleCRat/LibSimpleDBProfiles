@@ -3,9 +3,7 @@
 local BUILD_MINOR = 2
 local lib = LibStub("LibSimpleDBProfiles-1.0", true)
 
-if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then
-    return
-end
+if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then return end
 
 local Internal = lib._internal
 
@@ -61,7 +59,12 @@ local CHARACTER_INFO_FIELD_TYPES = {
 
 local function requireTable(value, label)
     if type(value) ~= "table" then
-        error(("LibSimpleDBProfiles: corrupt storage: %s must be a table"):format(label), STORAGE_ERROR_LEVEL)
+        error(
+            ("LibSimpleDBProfiles: corrupt storage: %s must be a table"):format(
+                label
+            ),
+            STORAGE_ERROR_LEVEL
+        )
     end
 
     return value
@@ -93,27 +96,39 @@ local function validateMetadata(storageMetadata)
     end
 
     if not Internal.IsPositiveInteger(storageMetadata.schema) then
-        error("LibSimpleDBProfiles: corrupt storage: schema must be a positive integer", STORAGE_ERROR_LEVEL)
+        error(
+            "LibSimpleDBProfiles: corrupt storage: schema must be a positive integer",
+            STORAGE_ERROR_LEVEL
+        )
     end
 
-    if storageMetadata.payloadVersion ~= nil
-        and not Internal.IsPositiveInteger(storageMetadata.payloadVersion) then
-        error("LibSimpleDBProfiles: corrupt storage: payloadVersion must be a positive integer", STORAGE_ERROR_LEVEL)
+    if
+        storageMetadata.payloadVersion ~= nil
+        and not Internal.IsPositiveInteger(storageMetadata.payloadVersion)
+    then
+        error(
+            "LibSimpleDBProfiles: corrupt storage: payloadVersion must be a positive integer",
+            STORAGE_ERROR_LEVEL
+        )
     end
 end
 
 local function runStorageMigrations(storage, storageMetadata)
     if storageMetadata.schema > CURRENT_STORAGE_SCHEMA_VERSION then
-        error(("LibSimpleDBProfiles: storage schema %d is newer than supported schema %d"):format(
-            storageMetadata.schema,
-            CURRENT_STORAGE_SCHEMA_VERSION
-        ), STORAGE_ERROR_LEVEL)
+        error(
+            ("LibSimpleDBProfiles: storage schema %d is newer than supported schema %d"):format(
+                storageMetadata.schema,
+                CURRENT_STORAGE_SCHEMA_VERSION
+            ),
+            STORAGE_ERROR_LEVEL
+        )
     end
 
     while storageMetadata.schema < CURRENT_STORAGE_SCHEMA_VERSION do
         local sourceSchemaVersion = storageMetadata.schema
         local targetSchemaVersion = sourceSchemaVersion + 1
-        local migrationStep = storageMigrationsBySourceVersion[sourceSchemaVersion]
+        local migrationStep =
+            storageMigrationsBySourceVersion[sourceSchemaVersion]
 
         if type(migrationStep) ~= "function" then
             error(
@@ -128,14 +143,20 @@ local function runStorageMigrations(storage, storageMetadata)
         local ok, message = pcall(migrationStep, stagedStorage)
 
         if not ok then
-            error(("LibSimpleDBProfiles: storage migration %d to %d failed: %s"):format(
-                sourceSchemaVersion,
-                targetSchemaVersion,
-                tostring(message)
-            ), STORAGE_ERROR_LEVEL)
+            error(
+                ("LibSimpleDBProfiles: storage migration %d to %d failed: %s"):format(
+                    sourceSchemaVersion,
+                    targetSchemaVersion,
+                    tostring(message)
+                ),
+                STORAGE_ERROR_LEVEL
+            )
         end
 
-        local stagedMetadata = requireTable(stagedStorage[STORAGE_METADATA_KEY], STORAGE_METADATA_KEY)
+        local stagedMetadata = requireTable(
+            stagedStorage[STORAGE_METADATA_KEY],
+            STORAGE_METADATA_KEY
+        )
         stagedMetadata.schema = targetSchemaVersion
         Internal.ValidateValue(stagedStorage)
         Internal.ReplaceTable(storage, stagedStorage)
@@ -168,10 +189,14 @@ local function normalizeUserProfiles(profiles)
         local storedName = storedNames[index]
 
         if type(storedName) ~= "string" then
-            error("LibSimpleDBProfiles: corrupt storage: user profile keys must be strings", STORAGE_ERROR_LEVEL)
+            error(
+                "LibSimpleDBProfiles: corrupt storage: user profile keys must be strings",
+                STORAGE_ERROR_LEVEL
+            )
         end
 
-        local normalizedName = Internal.NormalizeProfileName(storedName, "storage profile")
+        local normalizedName =
+            Internal.NormalizeProfileName(storedName, "storage profile")
 
         if not normalizedName then
             error(
@@ -182,7 +207,8 @@ local function normalizeUserProfiles(profiles)
             )
         end
 
-        local profilePayload = requireTable(profiles[storedName], "profiles[" .. storedName .. "]")
+        local profilePayload =
+            requireTable(profiles[storedName], "profiles[" .. storedName .. "]")
         Internal.ValidateValue(profilePayload)
 
         if normalizedName ~= storedName then
@@ -246,7 +272,8 @@ local function normalizeSelections(storage)
             )
         end
 
-        local normalizedRef, errorCode = Internal.NormalizeProfileRef(selection, "stored selection")
+        local normalizedRef, errorCode =
+            Internal.NormalizeProfileRef(selection, "stored selection")
 
         if not normalizedRef then
             error(
@@ -257,7 +284,10 @@ local function normalizeSelections(storage)
             )
         end
 
-        if normalizedRef.kind == "user" and storage.profiles[normalizedRef.name] == nil then
+        if
+            normalizedRef.kind == "user"
+            and storage.profiles[normalizedRef.name] == nil
+        then
             storage.selections[guid] = nil
         else
             storage.selections[guid] = normalizedRef
@@ -278,15 +308,12 @@ end
 -- LibSimpleDB when they need defaults applied.
 
 function Internal.GetProfilePayload(storage, profileID)
-    if profileID.kind == "user" then
-        return storage.profiles[profileID.name]
-    end
+    if profileID.kind == "user" then return storage.profiles[profileID.name] end
 
-    if profileID.profile == "global" then
-        return storage.global
-    end
+    if profileID.profile == "global" then return storage.global end
 
-    local container = storage[Internal.permanentProfileDefinitions[profileID.profile].container]
+    local container =
+        storage[Internal.permanentProfileDefinitions[profileID.profile].container]
     return container[profileID.key]
 end
 
@@ -296,7 +323,8 @@ function Internal.SetProfilePayload(storage, profileID, profilePayload)
     elseif profileID.profile == "global" then
         storage.global = profilePayload
     else
-        storage[Internal.permanentProfileDefinitions[profileID.profile].container][profileID.key] = profilePayload
+        storage[Internal.permanentProfileDefinitions[profileID.profile].container][profileID.key] =
+            profilePayload
     end
 
     return profilePayload
@@ -305,9 +333,7 @@ end
 function Internal.EnsureProfilePayload(storage, profileID)
     local profilePayload = Internal.GetProfilePayload(storage, profileID)
 
-    if profilePayload then
-        return profilePayload, false
-    end
+    if profilePayload then return profilePayload, false end
 
     profilePayload = {}
     Internal.SetProfilePayload(storage, profileID, profilePayload)
@@ -323,9 +349,7 @@ function Internal.EnsureCurrentPermanentProfilePayloads(storage, identity)
             identity
         )
 
-        if profileID then
-            Internal.EnsureProfilePayload(storage, profileID)
-        end
+        if profileID then Internal.EnsureProfilePayload(storage, profileID) end
     end
 end
 
@@ -354,9 +378,7 @@ function Internal.NormalizeStorage(storage, identity)
         storageMetadata.payloadVersion = INITIAL_PAYLOAD_VERSION
     end
 
-    if storage.global == nil then
-        storage.global = {}
-    end
+    if storage.global == nil then storage.global = {} end
 
     requireTable(storage.global, "global")
     Internal.ValidateValue(storage.global)
@@ -364,9 +386,7 @@ function Internal.NormalizeStorage(storage, identity)
     for index = 1, #TABLE_CONTAINER_KEYS do
         local containerKey = TABLE_CONTAINER_KEYS[index]
 
-        if storage[containerKey] == nil then
-            storage[containerKey] = {}
-        end
+        if storage[containerKey] == nil then storage[containerKey] = {} end
 
         requireTable(storage[containerKey], containerKey)
     end
@@ -428,7 +448,8 @@ function Internal.CollectProfileIDs(storage)
         local profileType = Internal.permanentProfileOrder[index]
 
         if profileType ~= "global" then
-            local container = storage[Internal.permanentProfileDefinitions[profileType].container]
+            local container =
+                storage[Internal.permanentProfileDefinitions[profileType].container]
             local profileKeys = Internal.SortedKeys(container)
 
             for keyIndex = 1, #profileKeys do
@@ -444,7 +465,8 @@ function Internal.CollectProfileIDs(storage)
     local userProfileNames = Internal.SortedKeys(storage.profiles)
 
     for index = 1, #userProfileNames do
-        profileIDs[#profileIDs + 1] = { kind = "user", name = userProfileNames[index] }
+        profileIDs[#profileIDs + 1] =
+            { kind = "user", name = userProfileNames[index] }
     end
 
     return profileIDs
@@ -466,7 +488,8 @@ function Internal.CollectPayloadEntries(storage)
         local profileType = Internal.permanentProfileOrder[index]
 
         if profileType ~= "global" then
-            local container = storage[Internal.permanentProfileDefinitions[profileType].container]
+            local container =
+                storage[Internal.permanentProfileDefinitions[profileType].container]
             local profileKeys = Internal.SortedKeys(container)
 
             for keyIndex = 1, #profileKeys do
@@ -475,7 +498,11 @@ function Internal.CollectPayloadEntries(storage)
                     container = container,
                     containerKey = profileKey,
                     payload = container[profileKey],
-                    profileID = { kind = "permanent", profile = profileType, key = profileKey },
+                    profileID = {
+                        kind = "permanent",
+                        profile = profileType,
+                        key = profileKey,
+                    },
                 }
             end
         end

@@ -3,9 +3,7 @@
 local BUILD_MINOR = 2
 local lib = LibStub("LibSimpleDBProfiles-1.0", true)
 
-if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then
-    return
-end
+if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then return end
 
 local Internal = lib._internal
 local Migration = Internal.migrationPrototype
@@ -22,11 +20,16 @@ local INITIAL_PAYLOAD_VERSION = 1
 
 function Migration:Add(sourceVersion, migrationStep)
     if self._isLocked then
-        error("LibSimpleDBProfiles: Migration is immutable after it is supplied to New()", METHOD_ERROR_LEVEL)
+        error(
+            "LibSimpleDBProfiles: Migration is immutable after it is supplied to New()",
+            METHOD_ERROR_LEVEL
+        )
     end
 
-    if not Internal.IsPositiveInteger(sourceVersion)
-        or sourceVersion >= self._targetPayloadVersion then
+    if
+        not Internal.IsPositiveInteger(sourceVersion)
+        or sourceVersion >= self._targetPayloadVersion
+    then
         error(
             "Usage: Migration:Add(sourceVersion, callback) requires a positive source version below the current version",
             METHOD_ERROR_LEVEL
@@ -34,7 +37,10 @@ function Migration:Add(sourceVersion, migrationStep)
     end
 
     if type(migrationStep) ~= "function" then
-        error("Usage: Migration:Add(sourceVersion, callback) requires a function", METHOD_ERROR_LEVEL)
+        error(
+            "Usage: Migration:Add(sourceVersion, callback) requires a function",
+            METHOD_ERROR_LEVEL
+        )
     end
 
     if self._stepsBySourceVersion[sourceVersion] then
@@ -67,18 +73,28 @@ function Internal.CreateMigration(currentVersion)
 end
 
 local function validateMigrationDefinition(migration)
-    if type(migration) ~= "table"
+    if
+        type(migration) ~= "table"
         or getmetatable(migration) ~= Internal.migrationMetatable
-        or migration._ownerLibrary ~= lib then
-        error("LibSimpleDBProfiles: options.migration must be created by LibSimpleDBProfiles-1.0", INTERNAL_ERROR_LEVEL)
+        or migration._ownerLibrary ~= lib
+    then
+        error(
+            "LibSimpleDBProfiles: options.migration must be created by LibSimpleDBProfiles-1.0",
+            INTERNAL_ERROR_LEVEL
+        )
     end
 
     if not Internal.IsPositiveInteger(migration._targetPayloadVersion) then
-        error("LibSimpleDBProfiles: Migration current version is invalid", INTERNAL_ERROR_LEVEL)
+        error(
+            "LibSimpleDBProfiles: Migration current version is invalid",
+            INTERNAL_ERROR_LEVEL
+        )
     end
 
     for sourceVersion = INITIAL_PAYLOAD_VERSION, migration._targetPayloadVersion - 1 do
-        if type(migration._stepsBySourceVersion[sourceVersion]) ~= "function" then
+        if
+            type(migration._stepsBySourceVersion[sourceVersion]) ~= "function"
+        then
             error(
                 ("LibSimpleDBProfiles: Migration is missing source version %d"):format(
                     sourceVersion
@@ -89,20 +105,28 @@ local function validateMigrationDefinition(migration)
     end
 
     for sourceVersion, migrationStep in pairs(migration._stepsBySourceVersion) do
-        if not Internal.IsPositiveInteger(sourceVersion)
+        if
+            not Internal.IsPositiveInteger(sourceVersion)
             or sourceVersion >= migration._targetPayloadVersion
-            or type(migrationStep) ~= "function" then
-            error("LibSimpleDBProfiles: Migration contains an invalid step", INTERNAL_ERROR_LEVEL)
+            or type(migrationStep) ~= "function"
+        then
+            error(
+                "LibSimpleDBProfiles: Migration contains an invalid step",
+                INTERNAL_ERROR_LEVEL
+            )
         end
     end
 
     migration._isLocked = true
 end
 
-function Internal.RunConsumerMigrations(storage, storageMetadata, migration, isFreshStorage)
-    if migration == nil then
-        return
-    end
+function Internal.RunConsumerMigrations(
+    storage,
+    storageMetadata,
+    migration,
+    isFreshStorage
+)
+    if migration == nil then return end
 
     validateMigrationDefinition(migration)
 
@@ -116,10 +140,13 @@ function Internal.RunConsumerMigrations(storage, storageMetadata, migration, isF
     end
 
     if storageMetadata.payloadVersion > targetPayloadVersion then
-        error(("LibSimpleDBProfiles: stored payloadVersion %d is newer than Migration version %d"):format(
-            storageMetadata.payloadVersion,
-            targetPayloadVersion
-        ), INTERNAL_ERROR_LEVEL)
+        error(
+            ("LibSimpleDBProfiles: stored payloadVersion %d is newer than Migration version %d"):format(
+                storageMetadata.payloadVersion,
+                targetPayloadVersion
+            ),
+            INTERNAL_ERROR_LEVEL
+        )
     end
 
     while storageMetadata.payloadVersion < targetPayloadVersion do
@@ -138,12 +165,15 @@ function Internal.RunConsumerMigrations(storage, storageMetadata, migration, isF
             local ok, message = pcall(migrationStep, payload, profileID)
 
             if not ok then
-                error(("LibSimpleDBProfiles: consumer migration %d to %d failed for %s: %s"):format(
-                    sourceVersion,
-                    nextVersion,
-                    Internal.FormatProfileID(profileID),
-                    tostring(message)
-                ), INTERNAL_ERROR_LEVEL)
+                error(
+                    ("LibSimpleDBProfiles: consumer migration %d to %d failed for %s: %s"):format(
+                        sourceVersion,
+                        nextVersion,
+                        Internal.FormatProfileID(profileID),
+                        tostring(message)
+                    ),
+                    INTERNAL_ERROR_LEVEL
+                )
             end
 
             Internal.ValidateValue(payload)
@@ -156,7 +186,8 @@ function Internal.RunConsumerMigrations(storage, storageMetadata, migration, isF
 
         for index = 1, #stagedPayloads do
             local stagedPayload = stagedPayloads[index]
-            stagedPayload.container[stagedPayload.containerKey] = stagedPayload.payload
+            stagedPayload.container[stagedPayload.containerKey] =
+                stagedPayload.payload
         end
 
         storageMetadata.payloadVersion = nextVersion

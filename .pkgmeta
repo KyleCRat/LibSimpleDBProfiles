@@ -5,6 +5,10 @@ manual-changelog:
     markup-type: markdown
 
 ignore:
+    - .stylua.toml
+    - .styluaignore
+    - selene.toml
+    - wow.yml
     - AGENTS.md
     - FIXME.md
     - TODO.md

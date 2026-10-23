@@ -4,7 +4,11 @@ local function findExact(profiles, profile, key)
     for index = 1, #profiles do
         local profileID = profiles[index].profileID
 
-        if profileID.kind == "permanent" and profileID.profile == profile and profileID.key == key then
+        if
+            profileID.kind == "permanent"
+            and profileID.profile == profile
+            and profileID.key == key
+        then
             return profiles[index]
         end
     end
@@ -69,119 +73,136 @@ H.test("administration enumerates exact historical profiles", function()
     H.assertNil(usage.unresolvedCharacters[1].profileID)
 end)
 
-H.test("character administration exposes metadata and detached selections", function()
-    local environment = H.freshLibrary()
-    local altGUID = "Player-3676-00000002"
-    local storage = {
-        characterInfo = {
-            [altGUID] = characterInfo("Magealt", "MAGE", 8, "62"),
-        },
-        characters = {
-            [altGUID] = { enabled = true },
-        },
-        selections = {
-            [altGUID] = { kind = "permanent", profile = "character" },
-        },
-    }
-    local manager = environment.library:New("TestAddon", storage)
-    local admin = manager:GetAdmin()
-    local characters = admin:GetCharacters()
-    H.assertEqual(#characters, 2)
+H.test(
+    "character administration exposes metadata and detached selections",
+    function()
+        local environment = H.freshLibrary()
+        local altGUID = "Player-3676-00000002"
+        local storage = {
+            characterInfo = {
+                [altGUID] = characterInfo("Magealt", "MAGE", 8, "62"),
+            },
+            characters = {
+                [altGUID] = { enabled = true },
+            },
+            selections = {
+                [altGUID] = { kind = "permanent", profile = "character" },
+            },
+        }
+        local manager = environment.library:New("TestAddon", storage)
+        local admin = manager:GetAdmin()
+        local characters = admin:GetCharacters()
+        H.assertEqual(#characters, 2)
 
-    local selection = admin:GetSelection(altGUID)
-    H.assertEqual(selection.profileRef.profile, "character")
-    H.assertEqual(selection.profileID.key, altGUID)
-    selection.profileRef.profile = "global"
-    H.assertEqual(storage.selections[altGUID].profile, "character")
+        local selection = admin:GetSelection(altGUID)
+        H.assertEqual(selection.profileRef.profile, "character")
+        H.assertEqual(selection.profileID.key, altGUID)
+        selection.profileRef.profile = "global"
+        H.assertEqual(storage.selections[altGUID].profile, "character")
 
-    local missing, errorCode = admin:GetSelection("Player-3676-99999999")
-    H.assertNil(missing)
-    H.assertEqual(errorCode, "CHARACTER_NOT_FOUND")
-end)
+        local missing, errorCode = admin:GetSelection("Player-3676-99999999")
+        H.assertNil(missing)
+        H.assertEqual(errorCode, "CHARACTER_NOT_FOUND")
+    end
+)
 
-H.test("administration changes offline selections and creates missing users", function()
-    local environment = H.freshLibrary()
-    local altGUID = "Player-3676-00000002"
-    local storage = {
-        characterInfo = {
-            [altGUID] = characterInfo("Magealt", "MAGE", 8, "62"),
-        },
-        characters = {
-            [altGUID] = {},
-        },
-    }
-    local manager = environment.library:New("TestAddon", storage)
-    local admin = manager:GetAdmin()
-    local events = {}
+H.test(
+    "administration changes offline selections and creates missing users",
+    function()
+        local environment = H.freshLibrary()
+        local altGUID = "Player-3676-00000002"
+        local storage = {
+            characterInfo = {
+                [altGUID] = characterInfo("Magealt", "MAGE", 8, "62"),
+            },
+            characters = {
+                [altGUID] = {},
+            },
+        }
+        local manager = environment.library:New("TestAddon", storage)
+        local admin = manager:GetAdmin()
+        local events = {}
 
-    manager:RegisterLifecycleCallback("OnProfileCreated", function()
-        events[#events + 1] = "created"
-    end)
+        manager:RegisterLifecycleCallback("OnProfileCreated", function()
+            events[#events + 1] = "created"
+        end)
 
-    manager:RegisterLifecycleCallback("OnCharacterSelectionChanged", function()
-        events[#events + 1] = "selection"
-    end)
+        manager:RegisterLifecycleCallback(
+            "OnCharacterSelectionChanged",
+            function()
+                events[#events + 1] = "selection"
+            end
+        )
 
-    local character, changed = admin:SetSelection(altGUID, { kind = "user", name = "Raid" })
-    H.assertTrue(changed)
-    H.assertEqual(character.profileID.name, "Raid")
-    H.assertTrue(type(storage.profiles.Raid) == "table")
-    H.assertEqual(events[1], "created")
-    H.assertEqual(events[2], "selection")
+        local character, changed =
+            admin:SetSelection(altGUID, { kind = "user", name = "Raid" })
+        H.assertTrue(changed)
+        H.assertEqual(character.profileID.name, "Raid")
+        H.assertTrue(type(storage.profiles.Raid) == "table")
+        H.assertEqual(events[1], "created")
+        H.assertEqual(events[2], "selection")
 
-    character, changed = admin:SetSelection(altGUID, { kind = "user", name = "Raid" })
-    H.assertFalse(changed)
-    H.assertEqual(#events, 2)
+        character, changed =
+            admin:SetSelection(altGUID, { kind = "user", name = "Raid" })
+        H.assertFalse(changed)
+        H.assertEqual(#events, 2)
 
-    local result, errorCode = admin:SetSelection(
-        environment.identity.guid,
-        { kind = "permanent", profile = "global" }
-    )
-    H.assertNil(result)
-    H.assertEqual(errorCode, "CURRENT_CHARACTER")
-end)
+        local result, errorCode = admin:SetSelection(
+            environment.identity.guid,
+            { kind = "permanent", profile = "global" }
+        )
+        H.assertNil(result)
+        H.assertEqual(errorCode, "CURRENT_CHARACTER")
+    end
+)
 
-H.test("administration permits unresolved relative offline selections", function()
-    local environment = H.freshLibrary()
-    local oldGUID = "Player-3676-00000003"
-    local storage = {
-        characterInfo = {
-            [oldGUID] = { name = "Oldalt", lastSeen = 1700000000 },
-        },
-        characters = {
-            [oldGUID] = {},
-        },
-    }
-    local manager = environment.library:New("TestAddon", storage)
-    local character, changed = manager:GetAdmin():SetSelection(oldGUID, {
-        kind = "permanent",
-        profile = "spec",
-    })
-    H.assertTrue(changed)
-    H.assertEqual(character.profileRef.profile, "spec")
-    H.assertNil(character.profileID)
-end)
+H.test(
+    "administration permits unresolved relative offline selections",
+    function()
+        local environment = H.freshLibrary()
+        local oldGUID = "Player-3676-00000003"
+        local storage = {
+            characterInfo = {
+                [oldGUID] = { name = "Oldalt", lastSeen = 1700000000 },
+            },
+            characters = {
+                [oldGUID] = {},
+            },
+        }
+        local manager = environment.library:New("TestAddon", storage)
+        local character, changed = manager:GetAdmin():SetSelection(oldGUID, {
+            kind = "permanent",
+            profile = "spec",
+        })
+        H.assertTrue(changed)
+        H.assertEqual(character.profileRef.profile, "spec")
+        H.assertNil(character.profileID)
+    end
+)
 
-H.test("normalization creates backing data for resolvable offline permanent selections", function()
-    local environment = H.freshLibrary()
-    local altGUID = "Player-3676-00000002"
-    local storage = {
-        characterInfo = {
-            [altGUID] = characterInfo("Magealt", "MAGE", 8, "62"),
-        },
-        selections = {
-            [altGUID] = { kind = "permanent", profile = "class" },
-        },
-    }
-    local manager = environment.library:New("TestAddon", storage)
-    H.assertTrue(type(storage.classes.MAGE) == "table")
-    local usage = manager:GetAdmin():GetProfileUsage({
-        kind = "permanent",
-        profile = "class",
-        key = "MAGE",
-    })
-    H.assertEqual(usage.selectionCount, 1)
-end)
+H.test(
+    "normalization creates backing data for resolvable offline permanent selections",
+    function()
+        local environment = H.freshLibrary()
+        local altGUID = "Player-3676-00000002"
+        local storage = {
+            characterInfo = {
+                [altGUID] = characterInfo("Magealt", "MAGE", 8, "62"),
+            },
+            selections = {
+                [altGUID] = { kind = "permanent", profile = "class" },
+            },
+        }
+        local manager = environment.library:New("TestAddon", storage)
+        H.assertTrue(type(storage.classes.MAGE) == "table")
+        local usage = manager:GetAdmin():GetProfileUsage({
+            kind = "permanent",
+            profile = "class",
+            key = "MAGE",
+        })
+        H.assertEqual(usage.selectionCount, 1)
+    end
+)
 
 H.test("administration resets and copies exact profiles", function()
     local environment = H.freshLibrary()

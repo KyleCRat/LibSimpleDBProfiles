@@ -32,73 +32,82 @@ H.test("equal embedded copies do not rebuild the active library", function()
     H.assertEqual(manager:GetActiveDB():GetDefault("missing"), nil)
 end)
 
-H.test("higher compatible minors update live instances and reject lower overwrite", function()
-    local environment = H.freshLibrary()
-    local originalMinor = environment.library.MINOR
-    local storage = { global = { value = 10 } }
-    local manager = environment.library:New("TestAddon", storage)
-    local activeDB = manager:GetActiveDB()
-    local oldMethod = manager.GetActiveProfile
+H.test(
+    "higher compatible minors update live instances and reject lower overwrite",
+    function()
+        local environment = H.freshLibrary()
+        local originalMinor = environment.library.MINOR
+        local storage = { global = { value = 10 } }
+        local manager = environment.library:New("TestAddon", storage)
+        local activeDB = manager:GetActiveDB()
+        local oldMethod = manager.GetActiveProfile
 
-    local upgraded = H.loadProfileLibrary(originalMinor + 1)
-    H.assertEqual(upgraded, environment.library)
-    H.assertEqual(upgraded.MINOR, originalMinor + 1)
-    H.assertEqual(manager:GetActiveDB(), activeDB)
-    H.assertEqual(manager:GetActiveDB():Get("value"), 10)
-    H.assertTrue(manager.GetActiveProfile ~= oldMethod)
+        local upgraded = H.loadProfileLibrary(originalMinor + 1)
+        H.assertEqual(upgraded, environment.library)
+        H.assertEqual(upgraded.MINOR, originalMinor + 1)
+        H.assertEqual(manager:GetActiveDB(), activeDB)
+        H.assertEqual(manager:GetActiveDB():Get("value"), 10)
+        H.assertTrue(manager.GetActiveProfile ~= oldMethod)
 
-    local upgradedMethod = manager.GetActiveProfile
-    H.loadProfileLibrary(originalMinor)
-    H.assertEqual(upgraded.MINOR, originalMinor + 1)
-    H.assertEqual(manager.GetActiveProfile, upgradedMethod)
-    H.assertEqual(manager:GetActiveDB(), activeDB)
-end)
+        local upgradedMethod = manager.GetActiveProfile
+        H.loadProfileLibrary(originalMinor)
+        H.assertEqual(upgraded.MINOR, originalMinor + 1)
+        H.assertEqual(manager.GetActiveProfile, upgradedMethod)
+        H.assertEqual(manager:GetActiveDB(), activeDB)
+    end
+)
 
-H.test("rejects future schemas, wrong containers, and unwrapped legacy data", function()
-    local environment = H.freshLibrary()
+H.test(
+    "rejects future schemas, wrong containers, and unwrapped legacy data",
+    function()
+        local environment = H.freshLibrary()
 
-    H.assertError(function()
-        environment.library:New("TestAddon", {
-            __lsdbProfiles = { schema = 2, payloadVersion = 1 },
-        })
-    end, "newer than supported")
+        H.assertError(function()
+            environment.library:New("TestAddon", {
+                __lsdbProfiles = { schema = 2, payloadVersion = 1 },
+            })
+        end, "newer than supported")
 
-    environment = H.freshLibrary()
-    local wrong = { profiles = "broken" }
+        environment = H.freshLibrary()
+        local wrong = { profiles = "broken" }
 
-    H.assertError(function()
-        environment.library:New("TestAddon", wrong)
-    end, "profiles must be a table")
+        H.assertError(function()
+            environment.library:New("TestAddon", wrong)
+        end, "profiles must be a table")
 
-    H.assertEqual(wrong.profiles, "broken")
+        H.assertEqual(wrong.profiles, "broken")
 
-    environment = H.freshLibrary()
+        environment = H.freshLibrary()
 
-    H.assertError(function()
-        environment.library:New("TestAddon", { enabled = true })
-    end, "unrecognized unversioned storage key")
+        H.assertError(function()
+            environment.library:New("TestAddon", { enabled = true })
+        end, "unrecognized unversioned storage key")
 
-    environment = H.freshLibrary()
+        environment = H.freshLibrary()
 
-    H.assertError(function()
-        environment.library:New("TestAddon", {
+        H.assertError(function()
+            environment.library:New("TestAddon", {
+                selections = {
+                    [environment.identity.guid] = { kind = "unexpected" },
+                },
+            })
+        end, "unknown profile reference kind")
+    end
+)
+
+H.test(
+    "recovers a dangling current user selection through initial selection",
+    function()
+        local environment = H.freshLibrary()
+        local guid = environment.identity.guid
+        local storage = {
+            global = { fallback = true },
             selections = {
-                [environment.identity.guid] = { kind = "unexpected" },
+                [guid] = { kind = "user", name = "Removed" },
             },
-        })
-    end, "unknown profile reference kind")
-end)
-
-H.test("recovers a dangling current user selection through initial selection", function()
-    local environment = H.freshLibrary()
-    local guid = environment.identity.guid
-    local storage = {
-        global = { fallback = true },
-        selections = {
-            [guid] = { kind = "user", name = "Removed" },
-        },
-    }
-    local manager = environment.library:New("TestAddon", storage)
-    H.assertEqual(manager:GetActiveProfile().profileID.profile, "global")
-    H.assertEqual(storage.selections[guid].profile, "global")
-end)
+        }
+        local manager = environment.library:New("TestAddon", storage)
+        H.assertEqual(manager:GetActiveProfile().profileID.profile, "global")
+        H.assertEqual(storage.selections[guid].profile, "global")
+    end
+)

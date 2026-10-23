@@ -1,0 +1,42 @@
+# Only globals used by this repository; review additions against the WoW API.
+# Names are checked here; API member signatures and secret-value contracts are not.
+base: lua51
+globals:
+    # Lua 5.1 permits assertions without a message; tests report source locations.
+    assert:
+        args:
+            - type: any
+            - type: string
+              required: false
+    C_AddOns:
+        any: true
+    C_SpecializationInfo:
+        any: true
+    CreateFrame:
+        any: true
+    GetClassInfo:
+        any: true
+    geterrorhandler:
+        any: true
+    GetNormalizedRealmName:
+        any: true
+    GetRealmID:
+        any: true
+    GetRealmName:
+        any: true
+    LibStub:
+        any: true
+    time:
+        any: true
+    UnitClass:
+        any: true
+    UnitClassBase:
+        any: true
+    UnitFactionGroup:
+        any: true
+    UnitGUID:
+        any: true
+    UnitLevel:
+        any: true
+    UnitName:
+        any: true

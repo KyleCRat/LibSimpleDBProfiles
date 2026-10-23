@@ -32,7 +32,14 @@ end
 
 function Harness.assertEqual(actual, expected, message)
     if actual ~= expected then
-        fail((message or "values differ") .. (": expected %s, got %s"):format(tostring(expected), tostring(actual)), 2)
+        fail(
+            (message or "values differ")
+                .. (": expected %s, got %s"):format(
+                    tostring(expected),
+                    tostring(actual)
+                ),
+            2
+        )
     end
 end
 
@@ -50,7 +57,14 @@ end
 
 function Harness.assertDeepEqual(actual, expected, message)
     if type(actual) ~= type(expected) then
-        fail(message or ("different types: %s and %s"):format(type(actual), type(expected)), 2)
+        fail(
+            message
+                or ("different types: %s and %s"):format(
+                    type(actual),
+                    type(expected)
+                ),
+            2
+        )
     end
 
     if type(actual) ~= "table" then
@@ -72,12 +86,16 @@ end
 function Harness.assertError(callback, expectedText)
     local ok, message = pcall(callback)
 
-    if ok then
-        fail("expected an error", 2)
-    end
+    if ok then fail("expected an error", 2) end
 
     if expectedText and not tostring(message):find(expectedText, 1, true) then
-        fail(("expected error containing %q, got %q"):format(expectedText, tostring(message)), 2)
+        fail(
+            ("expected error containing %q, got %q"):format(
+                expectedText,
+                tostring(message)
+            ),
+            2
+        )
     end
 end
 
@@ -147,7 +165,9 @@ local function installWoWMocks(environment)
     end
 
     _G.UnitClass = function()
-        return environment.identity.className, environment.identity.class, environment.identity.classID
+        return environment.identity.className,
+            environment.identity.class,
+            environment.identity.classID
     end
 
     _G.UnitFactionGroup = function()
@@ -189,7 +209,8 @@ local function installWoWMocks(environment)
 
     _G.geterrorhandler = function()
         return function(message)
-            environment.callbackErrors[#environment.callbackErrors + 1] = tostring(message)
+            environment.callbackErrors[#environment.callbackErrors + 1] =
+                tostring(message)
         end
     end
 
@@ -273,9 +294,7 @@ end
 function Harness.loadSuite(path)
     local chunk, message = loadfile(path)
 
-    if not chunk then
-        error(message, 2)
-    end
+    if not chunk then error(message, 2) end
 
     chunk(Harness)
 end
@@ -292,15 +311,18 @@ function Harness.loadProfileLibrary(minor)
             handle:close()
             source = source:gsub(
                 'local LIBRARY_MAJOR, LIBRARY_MINOR = "LibSimpleDBProfiles%-1%.0", %d+',
-                ('local LIBRARY_MAJOR, LIBRARY_MINOR = "LibSimpleDBProfiles-1.0", %d'):format(minor),
+                ('local LIBRARY_MAJOR, LIBRARY_MINOR = "LibSimpleDBProfiles-1.0", %d'):format(
+                    minor
+                ),
                 1
             )
-            source = source:gsub("local BUILD_MINOR = %d+", "local BUILD_MINOR = " .. minor)
+            source = source:gsub(
+                "local BUILD_MINOR = %d+",
+                "local BUILD_MINOR = " .. minor
+            )
             local chunk, message = loadstring(source, "@" .. path)
 
-            if not chunk then
-                error(message, 2)
-            end
+            if not chunk then error(message, 2) end
 
             chunk()
         end
@@ -322,15 +344,19 @@ function Harness.run()
             io.write(("ok %d - %s\n"):format(index, current.name))
         else
             failed = failed + 1
-            io.write(("not ok %d - %s\n%s\n"):format(index, current.name, tostring(message)))
+            io.write(
+                ("not ok %d - %s\n%s\n"):format(
+                    index,
+                    current.name,
+                    tostring(message)
+                )
+            )
         end
     end
 
     io.write(("\n%d passed, %d failed\n"):format(passed, failed))
 
-    if failed > 0 then
-        os.exit(1)
-    end
+    if failed > 0 then os.exit(1) end
 end
 
 return Harness

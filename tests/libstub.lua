@@ -10,9 +10,7 @@ function LibStub:NewLibrary(major, minor)
 
     local oldMinor = self.minors[major]
 
-    if oldMinor and oldMinor >= minor then
-        return nil, oldMinor
-    end
+    if oldMinor and oldMinor >= minor then return nil, oldMinor end
 
     local library = self.libs[major]
 

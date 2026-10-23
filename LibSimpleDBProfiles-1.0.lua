@@ -8,20 +8,23 @@ local WEAK_KEYS_AND_VALUES = "kv"
 
 local SimpleDB, simpleDBMinor = LibStub("LibSimpleDB-2.0", true)
 
-if not SimpleDB
+if
+    not SimpleDB
     or type(simpleDBMinor) ~= "number"
-    or simpleDBMinor < REQUIRED_SIMPLE_DB_MINOR then
-    error(("%s requires LibSimpleDB-2.0 minor %d or newer"):format(
-        LIBRARY_MAJOR,
-        REQUIRED_SIMPLE_DB_MINOR
-    ), CALLER_ERROR_LEVEL)
+    or simpleDBMinor < REQUIRED_SIMPLE_DB_MINOR
+then
+    error(
+        ("%s requires LibSimpleDB-2.0 minor %d or newer"):format(
+            LIBRARY_MAJOR,
+            REQUIRED_SIMPLE_DB_MINOR
+        ),
+        CALLER_ERROR_LEVEL
+    )
 end
 
 local lib, previousMinor = LibStub:NewLibrary(LIBRARY_MAJOR, LIBRARY_MINOR)
 
-if not lib then
-    return
-end
+if not lib then return end
 
 local pairs = pairs
 local setmetatable = setmetatable

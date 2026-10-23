@@ -2,9 +2,7 @@
 local BUILD_MINOR = 2
 local lib = LibStub("LibSimpleDBProfiles-1.0", true)
 
-if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then
-    return
-end
+if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then return end
 
 local Internal = lib._internal
 
@@ -77,18 +75,29 @@ end
 local function copyValue(value, activeAncestors, callerErrorLevel)
     local valueType = type(value)
 
-    if valueType == "nil" or valueType == "boolean" or valueType == "number" or valueType == "string" then
+    if
+        valueType == "nil"
+        or valueType == "boolean"
+        or valueType == "number"
+        or valueType == "string"
+    then
         return value
     end
 
     if valueType ~= "table" then
-        error("LibSimpleDBProfiles: values must be SavedVariables-compatible primitives or tables", callerErrorLevel)
+        error(
+            "LibSimpleDBProfiles: values must be SavedVariables-compatible primitives or tables",
+            callerErrorLevel
+        )
     end
 
     activeAncestors = activeAncestors or {}
 
     if activeAncestors[value] then
-        error("LibSimpleDBProfiles: cyclic tables are not supported", callerErrorLevel)
+        error(
+            "LibSimpleDBProfiles: cyclic tables are not supported",
+            callerErrorLevel
+        )
     end
 
     activeAncestors[value] = true
@@ -97,10 +106,14 @@ local function copyValue(value, activeAncestors, callerErrorLevel)
 
     for key, childValue in pairs(value) do
         if not isSavedVariablesKey(key) then
-            error("LibSimpleDBProfiles: table keys must be strings or numbers", callerErrorLevel)
+            error(
+                "LibSimpleDBProfiles: table keys must be strings or numbers",
+                callerErrorLevel
+            )
         end
 
-        copiedTable[key] = copyValue(childValue, activeAncestors, callerErrorLevel)
+        copiedTable[key] =
+            copyValue(childValue, activeAncestors, callerErrorLevel)
     end
 
     activeAncestors[value] = nil
@@ -114,23 +127,37 @@ end
 local function validateValue(value, activeAncestors, callerErrorLevel)
     local valueType = type(value)
 
-    if valueType == "nil" or valueType == "boolean" or valueType == "number" or valueType == "string" then
+    if
+        valueType == "nil"
+        or valueType == "boolean"
+        or valueType == "number"
+        or valueType == "string"
+    then
         return
     end
 
     if valueType ~= "table" then
-        error("LibSimpleDBProfiles: values must be SavedVariables-compatible primitives or tables", callerErrorLevel)
+        error(
+            "LibSimpleDBProfiles: values must be SavedVariables-compatible primitives or tables",
+            callerErrorLevel
+        )
     end
 
     if activeAncestors[value] then
-        error("LibSimpleDBProfiles: cyclic tables are not supported", callerErrorLevel)
+        error(
+            "LibSimpleDBProfiles: cyclic tables are not supported",
+            callerErrorLevel
+        )
     end
 
     activeAncestors[value] = true
 
     for key, childValue in pairs(value) do
         if not isSavedVariablesKey(key) then
-            error("LibSimpleDBProfiles: table keys must be strings or numbers", callerErrorLevel)
+            error(
+                "LibSimpleDBProfiles: table keys must be strings or numbers",
+                callerErrorLevel
+            )
         end
 
         validateValue(childValue, activeAncestors, callerErrorLevel)
@@ -156,24 +183,16 @@ function Internal.ReplaceTable(destination, source)
 end
 
 function Internal.DeepEqual(left, right)
-    if type(left) ~= type(right) then
-        return false
-    end
+    if type(left) ~= type(right) then return false end
 
-    if type(left) ~= "table" then
-        return left == right
-    end
+    if type(left) ~= "table" then return left == right end
 
     for key, value in pairs(left) do
-        if not Internal.DeepEqual(value, right[key]) then
-            return false
-        end
+        if not Internal.DeepEqual(value, right[key]) then return false end
     end
 
     for key in pairs(right) do
-        if left[key] == nil then
-            return false
-        end
+        if left[key] == nil then return false end
     end
 
     return true
@@ -202,7 +221,11 @@ local function isByteInRange(byte, minimum, maximum)
 end
 
 local function isContinuation(byte)
-    return isByteInRange(byte, UTF8_CONTINUATION_MIN_BYTE, UTF8_CONTINUATION_MAX_BYTE)
+    return isByteInRange(
+        byte,
+        UTF8_CONTINUATION_MIN_BYTE,
+        UTF8_CONTINUATION_MAX_BYTE
+    )
 end
 
 local function hasContinuationBytes(value, firstIndex, count)
@@ -224,7 +247,9 @@ function Internal.IsValidUTF8(value)
 
         if first <= ASCII_MAX_BYTE then
             index = index + 1
-        elseif isByteInRange(first, UTF8_TWO_BYTE_LEAD_MIN, UTF8_TWO_BYTE_LEAD_MAX) then
+        elseif
+            isByteInRange(first, UTF8_TWO_BYTE_LEAD_MIN, UTF8_TWO_BYTE_LEAD_MAX)
+        then
             if not hasContinuationBytes(value, index + 1, 1) then
                 return false
             end
@@ -233,21 +258,30 @@ function Internal.IsValidUTF8(value)
         elseif first == UTF8_THREE_BYTE_LOW_LEAD then
             local second = stringByte(value, index + 1)
 
-            if not isByteInRange(second, UTF8_THREE_BYTE_LOW_SECOND_MIN, UTF8_CONTINUATION_MAX_BYTE)
-                or not hasContinuationBytes(value, index + 2, 1) then
+            if
+                not isByteInRange(
+                    second,
+                    UTF8_THREE_BYTE_LOW_SECOND_MIN,
+                    UTF8_CONTINUATION_MAX_BYTE
+                )
+                or not hasContinuationBytes(value, index + 2, 1)
+            then
                 return false
             end
 
             index = index + 3
-        elseif isByteInRange(
-            first,
-            UTF8_THREE_BYTE_GENERAL_LOW_MIN,
-            UTF8_THREE_BYTE_GENERAL_LOW_MAX
-        ) or isByteInRange(
-            first,
-            UTF8_THREE_BYTE_GENERAL_HIGH_MIN,
-            UTF8_THREE_BYTE_GENERAL_HIGH_MAX
-        ) then
+        elseif
+            isByteInRange(
+                first,
+                UTF8_THREE_BYTE_GENERAL_LOW_MIN,
+                UTF8_THREE_BYTE_GENERAL_LOW_MAX
+            )
+            or isByteInRange(
+                first,
+                UTF8_THREE_BYTE_GENERAL_HIGH_MIN,
+                UTF8_THREE_BYTE_GENERAL_HIGH_MAX
+            )
+        then
             if not hasContinuationBytes(value, index + 1, 2) then
                 return false
             end
@@ -256,8 +290,14 @@ function Internal.IsValidUTF8(value)
         elseif first == UTF8_THREE_BYTE_HIGH_LEAD then
             local second = stringByte(value, index + 1)
 
-            if not isByteInRange(second, UTF8_CONTINUATION_MIN_BYTE, UTF8_THREE_BYTE_HIGH_SECOND_MAX)
-                or not hasContinuationBytes(value, index + 2, 1) then
+            if
+                not isByteInRange(
+                    second,
+                    UTF8_CONTINUATION_MIN_BYTE,
+                    UTF8_THREE_BYTE_HIGH_SECOND_MAX
+                )
+                or not hasContinuationBytes(value, index + 2, 1)
+            then
                 return false
             end
 
@@ -265,13 +305,25 @@ function Internal.IsValidUTF8(value)
         elseif first == UTF8_FOUR_BYTE_LOW_LEAD then
             local second = stringByte(value, index + 1)
 
-            if not isByteInRange(second, UTF8_FOUR_BYTE_LOW_SECOND_MIN, UTF8_CONTINUATION_MAX_BYTE)
-                or not hasContinuationBytes(value, index + 2, 2) then
+            if
+                not isByteInRange(
+                    second,
+                    UTF8_FOUR_BYTE_LOW_SECOND_MIN,
+                    UTF8_CONTINUATION_MAX_BYTE
+                )
+                or not hasContinuationBytes(value, index + 2, 2)
+            then
                 return false
             end
 
             index = index + 4
-        elseif isByteInRange(first, UTF8_FOUR_BYTE_GENERAL_MIN, UTF8_FOUR_BYTE_GENERAL_MAX) then
+        elseif
+            isByteInRange(
+                first,
+                UTF8_FOUR_BYTE_GENERAL_MIN,
+                UTF8_FOUR_BYTE_GENERAL_MAX
+            )
+        then
             if not hasContinuationBytes(value, index + 1, 3) then
                 return false
             end
@@ -280,8 +332,14 @@ function Internal.IsValidUTF8(value)
         elseif first == UTF8_FOUR_BYTE_HIGH_LEAD then
             local second = stringByte(value, index + 1)
 
-            if not isByteInRange(second, UTF8_CONTINUATION_MIN_BYTE, UTF8_FOUR_BYTE_HIGH_SECOND_MAX)
-                or not hasContinuationBytes(value, index + 2, 2) then
+            if
+                not isByteInRange(
+                    second,
+                    UTF8_CONTINUATION_MIN_BYTE,
+                    UTF8_FOUR_BYTE_HIGH_SECOND_MAX
+                )
+                or not hasContinuationBytes(value, index + 2, 2)
+            then
                 return false
             end
 
@@ -301,12 +359,15 @@ end
 
 function Internal.NormalizeProfileName(value, operation)
     if type(value) ~= "string" then
-        error(("Usage: manager:%s(...) requires a string profile name"):format(operation), INTERNAL_CALLER_ERROR_LEVEL)
+        error(
+            ("Usage: manager:%s(...) requires a string profile name"):format(
+                operation
+            ),
+            INTERNAL_CALLER_ERROR_LEVEL
+        )
     end
 
-    if not Internal.IsValidUTF8(value) then
-        return nil, "INVALID_NAME"
-    end
+    if not Internal.IsValidUTF8(value) then return nil, "INVALID_NAME" end
 
     local normalizedBytes = {}
     local hasContent = false
@@ -316,9 +377,7 @@ function Internal.NormalizeProfileName(value, operation)
         local byte = stringByte(value, index)
 
         if isASCIIWhitespace(byte) then
-            if hasContent then
-                pendingSpace = true
-            end
+            if hasContent then pendingSpace = true end
         elseif byte <= ASCII_CONTROL_MAX_BYTE or byte == ASCII_DELETE_BYTE then
             return nil, "INVALID_NAME"
         else
@@ -332,9 +391,7 @@ function Internal.NormalizeProfileName(value, operation)
         end
     end
 
-    if not hasContent then
-        return nil, "INVALID_NAME"
-    end
+    if not hasContent then return nil, "INVALID_NAME" end
 
     return tableConcat(normalizedBytes)
 end
@@ -342,9 +399,7 @@ end
 -- Lifecycle callback dispatch
 
 function Internal.ReportCallbackError(errorMessage)
-    if type(getErrorHandler) ~= "function" then
-        return
-    end
+    if type(getErrorHandler) ~= "function" then return end
 
     local ok, errorHandler = pcall(getErrorHandler)
 
@@ -356,17 +411,13 @@ end
 function Internal.CallSafely(callback, ...)
     local ok, errorMessage = pcall(callback, ...)
 
-    if not ok then
-        Internal.ReportCallbackError(errorMessage)
-    end
+    if not ok then Internal.ReportCallbackError(errorMessage) end
 end
 
 function Internal.DispatchLifecycle(manager, event, ...)
     local callbacks = manager._lifecycleCallbacks[event]
 
-    if not callbacks then
-        return
-    end
+    if not callbacks then return end
 
     local callbackSnapshot = {}
 
@@ -383,33 +434,35 @@ end
 -- omit those keys and resolve relative to a character.
 
 function Internal.ProfileIDEqual(left, right)
-    if left == right then
-        return true
-    end
+    if left == right then return true end
 
-    if type(left) ~= "table" or type(right) ~= "table" or left.kind ~= right.kind then
+    if
+        type(left) ~= "table"
+        or type(right) ~= "table"
+        or left.kind ~= right.kind
+    then
         return false
     end
 
-    if left.kind == "user" then
-        return left.name == right.name
-    end
+    if left.kind == "user" then return left.name == right.name end
 
     return left.profile == right.profile and left.key == right.key
 end
 
 function Internal.ProfileRefEqual(left, right)
-    if left == right then
-        return true
-    end
+    if left == right then return true end
 
-    if type(left) ~= "table" or type(right) ~= "table" or left.kind ~= right.kind then
+    if
+        type(left) ~= "table"
+        or type(right) ~= "table"
+        or left.kind ~= right.kind
+    then
         return false
     end
 
-    if left.kind == "user" then
-        return left.name == right.name
-    end
+    if left.kind == "user" then return left.name == right.name end
 
-    return left.profile == right.profile and left.key == nil and right.key == nil
+    return left.profile == right.profile
+        and left.key == nil
+        and right.key == nil
 end
