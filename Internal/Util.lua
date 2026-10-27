@@ -1,5 +1,5 @@
 -- Shared SavedVariables, profile-name, callback, and identity helpers.
-local BUILD_MINOR = 2
+local BUILD_MINOR = 3
 local lib = LibStub("LibSimpleDBProfiles-1.0", true)
 
 if not lib or lib._loadInProgressMinor ~= BUILD_MINOR then return end

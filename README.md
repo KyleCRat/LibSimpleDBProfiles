@@ -10,11 +10,11 @@ The current API family is `LibSimpleDBProfiles-1.0`. It targets WoW Interface
 
 ## Status
 
-Release `1.1.0` uses LibStub implementation minor `2` in the existing
+Release `1.1.1` uses LibStub implementation minor `3` in the existing
 `LibSimpleDBProfiles-1.0` family and requires `LibSimpleDB` `2.0.0` or newer
-within its `LibSimpleDB-2.0` family. It adds configurable first-use selection
-through `initialProfile`; existing selections and the default most-specific
-policy are unchanged. See the changelog before updating a consumer's package pin.
+within its `LibSimpleDB-2.0` family. This maintenance release standardizes
+formatting and contributor tooling without changing profile behavior or stored
+data. See the changelog before updating a consumer's package pin.
 
 ## Embed And Create
 

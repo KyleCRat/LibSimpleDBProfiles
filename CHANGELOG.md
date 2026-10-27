@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.1.1 - 2026-10-27
+
+- Standardize Lua formatting and add standalone StyLua/Selene checks for the
+  library and tests. Profile selection, migrations, and stored data are unchanged.
+- Publish LibStub implementation minor 3 within `LibSimpleDBProfiles-1.0`.
+
 ## 1.1.0 - 2026-09-19
 
 - Add the `initialProfile` constructor option: keep `mostSpecific` as the
